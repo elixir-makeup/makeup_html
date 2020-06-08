@@ -1,6 +1,6 @@
 # MakeupHTML
 
-Lexe for the HTML language for Makeup.
+Lexer for the HTML language for Makeup.
 
 ## Installation
 

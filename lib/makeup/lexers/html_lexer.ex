@@ -90,13 +90,18 @@ defmodule Makeup.Lexers.HTMLLexer do
   @inline Application.get_env(:makeup_html, :inline, false)
 
   @impl Makeup.Lexer
-  defparsec :root_element,
+  defparsec(
+    :root_element,
     root_element_combinator |> map({__MODULE__, :__as_html_language__, []}),
     inline: @inline
+  )
 
   @impl Makeup.Lexer
-  defparsec :root,
-    repeat(parsec(:root_element)), inline: @inline
+  defparsec(
+    :root,
+    repeat(parsec(:root_element)),
+    inline: @inline
+  )
 
   ###################################################################
   # Step #2: postprocess the list of tokens
@@ -113,12 +118,11 @@ defmodule Makeup.Lexers.HTMLLexer do
   #######################################################################
 
   @impl Makeup.Lexer
-  defgroupmatcher :match_groups, [
+  defgroupmatcher(:match_groups,
     parentheses: [
       open: [[{:punctuation, _, "("}]],
       close: [[{:punctuation, _, ")"}]]
     ],
-
     straight_brackets: [
       open: [
         [{:punctuation, _, "["}]
@@ -127,7 +131,6 @@ defmodule Makeup.Lexers.HTMLLexer do
         [{:punctuation, _, "]"}]
       ]
     ],
-
     curly_braces: [
       open: [
         [{:punctuation, _, "{"}]
@@ -136,7 +139,7 @@ defmodule Makeup.Lexers.HTMLLexer do
         [{:punctuation, _, "}"}]
       ]
     ]
-  ]
+  )
 
   # Finally, the public API for the lexer
   @impl Makeup.Lexer
