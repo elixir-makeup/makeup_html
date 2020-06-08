@@ -39,7 +39,7 @@ defmodule MakeupHTML.Mixfile do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger, :stream_data]
+      extra_applications: [:logger]
     ]
   end
 
