@@ -1,5 +1,6 @@
 defmodule HTMLLexerTokenizer do
   use ExUnit.Case, async: false
+  use ExUnitProperties
   alias Makeup.Lexers.HTMLLexer
   alias Makeup.Lexer.Postprocess
 
@@ -18,5 +19,11 @@ defmodule HTMLLexerTokenizer do
 
   test "empty string" do
     assert lex("") == []
+  end
+
+  property "HTML document does not produce errors" do
+    check all(document <- HTMLGenerators.document()) do
+      assert !Enum.any?(lex(document), &match?({:error, _, _}, &1))
+    end
   end
 end
