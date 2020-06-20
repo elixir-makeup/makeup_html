@@ -50,7 +50,7 @@ defmodule HTMLGenerators do
     ExUnitProperties.gen all(
                            element_name <- StreamData.member_of(HTMLElements.get_elements()),
                            content <- StreamData.string(:alphanumeric),
-                           attributes <- StreamData.list_of(attribute()),
+                           attributes <- StreamData.list_of(attribute(), max_length: 3),
                            attributes_string <-
                              StreamData.constant(" " <> Enum.join(attributes, " ")),
                            element <-
@@ -69,8 +69,8 @@ defmodule HTMLGenerators do
   def nested_element do
     ExUnitProperties.gen all(
                            element_name <- StreamData.member_of(HTMLElements.get_elements()),
-                           content <- single_element(),
-                           attributes <- StreamData.list_of(attribute())
+                           content <- StreamData.one_of([void_element(), single_element()]),
+                           attributes <- StreamData.list_of(attribute(), max_length: 3)
                          ) do
       "<" <>
         element_name <>
@@ -90,6 +90,21 @@ defmodule HTMLGenerators do
                              ])
                          ) do
       element
+    end
+  end
+
+  def document do
+    ExUnitProperties.gen all(
+                           bom <- StreamData.member_of([:unicode.encoding_to_bom(:utf8), ""]),
+                           any_comments <- StreamData.list_of(comment(), max_length: 3),
+                           doctype <- doctype(),
+                           document_content <- StreamData.list_of(element(), max_length: 3)
+                         ) do
+      comments = Enum.join(any_comments, "\n")
+      document = "<html>\n" <> Enum.join(document_content, "\n") <> "\n</html>"
+
+      bom <>
+        comments <> "\n" <> doctype <> "\n" <> comments <> "\n" <> document <> "\n" <> comments
     end
   end
 
