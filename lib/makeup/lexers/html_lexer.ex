@@ -8,53 +8,57 @@ defmodule Makeup.Lexers.HTMLLexer do
   import NimbleParsec
   import Makeup.Lexer.Combinators
   import Makeup.Lexer.Groups
+  import Makeup.Lexers.HTMLLexer.Combinators
+  alias Makeup.Lexers.HTMLLexer.HTMLElements
+  alias Makeup.Lexers.HTMLLexer.HTMLAttributes
+
+  @keywords HTMLElements.get_elements() ++
+              HTMLAttributes.get_attributes() ++ HTMLAttributes.get_event_handler_attributes()
 
   ###################################################################
   # Step #1: tokenize the input (into a list of tokens)
   ###################################################################
 
-  whitespace = ascii_string([?\s, ?\n], min: 1) |> token(:whitespace)
+  wspace = ascii_string([?\r, ?\s, ?\n, ?\f], min: 1)
+
+  whitespace = wspace |> token(:whitespace)
 
   # This is the combinator that ensures that the lexer will never reject a file
   # because of invalid input syntax
   any_char = utf8_char([]) |> token(:error)
 
-  # Numbers
-  digits = ascii_string([?0..?9], min: 1)
-  number_integer = token(digits, :number_integer)
+  keywords = Enum.map(@keywords, &keyword/1)
 
-  # Floating point numbers
-  float_scientific_notation_part =
-    ascii_string([?e, ?E], 1)
-    |> optional(string("-"))
-    |> concat(digits)
+  operators =
+    ascii_string([?=], 1)
+    |> token(:operator)
 
-  number_float =
-    number_integer
-    |> string(".")
-    |> concat(digits)
-    |> optional(float_scientific_notation_part)
-    |> token(:number_float)
+  doctype =
+    "<!"
+    |> string()
+    |> concat(anycase_string("DOCTYPE"))
+    |> optional(wspace)
+    |> concat(anycase_string("html"))
+    # optional doctype legacy string
+    |> optional(wspace)
+    |> concat(string(">"))
+    |> token(:keyword)
 
-  # Yes, Elixir supports much more than this.
-  # TODO: adapt the code from the official tokenizer, which parses the unicode database
-  variable_name =
-    ascii_string([?a..?z, ?_], 1)
-    |> optional(ascii_string([?a..?z, ?_, ?0..?9, ?A..?Z], min: 1))
-
-  # Can also be a function name
-  variable =
-    variable_name
-    # Check if you need to use the lexeme parser
-    # (i.e. if you need the token value to be a string)
-    # If not, just delete the lexeme parser
+  insensitive_string =
+    ascii_string([?a..?z, ?A..?Z, ?0..?9], 1)
+    |> optional(
+      ascii_string([?a..?z, ?_, ?0..?9, ?A..?Z, ?\r, ?\s, ?\n, ?\f, ?>, ?<, ?!], min: 1)
+    )
     |> lexeme
-    |> token(:name)
+    |> token(:string)
 
   # Combinators that highlight expressions surrounded by a pair of delimiters.
-  parentheses = many_surrounded_by(parsec(:root_element), "(", ")")
-  straight_brackets = many_surrounded_by(parsec(:root_element), "[", "]")
-  curly_braces = many_surrounded_by(parsec(:root_element), "{", "}")
+  start_tag = many_surrounded_by(parsec(:root_element), "<", ">")
+  end_tag = many_surrounded_by(parsec(:root_element), "</", ">")
+  single_tag = many_surrounded_by(parsec(:root_element), "<", "/>")
+  comment_tag = many_surrounded_by(parsec(:root_element), "<!--", "-->")
+  doctype_tag = many_surrounded_by(parsec(:root_element), "<!", ">")
+  attribute_delimiters = many_surrounded_by(parsec(:root_element), "\"", "\"")
 
   # Tag the tokens with the language name.
   # This makes it easier to postprocess files with multiple languages.
@@ -64,22 +68,26 @@ defmodule Makeup.Lexers.HTMLLexer do
   end
 
   root_element_combinator =
-    choice([
-      whitespace,
-      # Parenthesis, etc. (these might be unnecessary)
-      parentheses,
-      straight_brackets,
-      curly_braces,
-      # Numbers
-      number_float,
-      number_integer,
-      # Variables
-      variable,
-      # If we can't parse any of the above, we highlight the next character as an error
-      # and proceed from there.
-      # A lexer should always consume any string given as input.
-      any_char
-    ])
+    choice(
+      [
+        doctype,
+        operators,
+        # Delimiters
+        comment_tag,
+        doctype_tag,
+        single_tag,
+        end_tag,
+        start_tag,
+        attribute_delimiters
+      ] ++
+        keywords ++
+        [
+          insensitive_string,
+          whitespace,
+          # Error
+          any_char
+        ]
+    )
 
   ##############################################################################
   # Semi-public API: these two functions can be used by someone who wants to
@@ -119,25 +127,29 @@ defmodule Makeup.Lexers.HTMLLexer do
 
   @impl Makeup.Lexer
   defgroupmatcher(:match_groups,
-    parentheses: [
-      open: [[{:punctuation, _, "("}]],
-      close: [[{:punctuation, _, ")"}]]
+    start_tag: [
+      open: [[{:punctuation, _, "<"}]],
+      close: [[{:punctuation, _, ">"}]]
     ],
-    straight_brackets: [
-      open: [
-        [{:punctuation, _, "["}]
-      ],
-      close: [
-        [{:punctuation, _, "]"}]
-      ]
+    end_tag: [
+      open: [[{:punctuation, _, "</"}]],
+      close: [[{:punctuation, _, ">"}]]
     ],
-    curly_braces: [
-      open: [
-        [{:punctuation, _, "{"}]
-      ],
-      close: [
-        [{:punctuation, _, "}"}]
-      ]
+    single_tag: [
+      open: [[{:punctuation, _, "<"}]],
+      close: [[{:punctuation, _, "/>"}]]
+    ],
+    comment_tag: [
+      open: [[{:punctuation, _, "<!--"}]],
+      close: [[{:punctuation, _, "-->"}]]
+    ],
+    doctype_tag: [
+      open: [[{:punctuation, _, "<!"}]],
+      close: [[{:punctuation, _, ">"}]]
+    ],
+    attribute_delimiters: [
+      open: [[{:punctuation, _, "\""}]],
+      close: [[{:punctuation, _, "\""}]]
     ]
   )
 

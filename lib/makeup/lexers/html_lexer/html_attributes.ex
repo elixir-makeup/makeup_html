@@ -1,4 +1,4 @@
-defmodule HTMLAttributes do
+defmodule Makeup.Lexers.HTMLLexer.HTMLAttributes do
   # HTML5 Attributes
   # https://html.spec.whatwg.org/multipage/indices.html#attributes-3
   @attributes [
