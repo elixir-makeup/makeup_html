@@ -1,9 +1,11 @@
 defmodule HTMLLexerTokenizer do
   use ExUnit.Case, async: false
   use ExUnitProperties
+
   alias Makeup.Lexers.HTMLLexer
   alias Makeup.Lexer.Postprocess
   alias Helper
+  alias Makeup.Lexers.HTMLLexer.HTMLElements
 
   # This function has three purposes:
   # 1. Ensure deterministic lexer output (no random prefix)

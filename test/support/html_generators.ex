@@ -5,6 +5,9 @@ defmodule HTMLGenerators do
   alias Makeup.Lexers.HTMLLexer.HTMLAttributes
   alias Helper
 
+  @keywords HTMLElements.get_elements() ++
+              HTMLAttributes.get_attributes() ++ HTMLAttributes.get_event_handler_attributes()
+
   def doctype do
     ExUnitProperties.gen all(
                            one_or_more <- StreamData.integer(1..5),
@@ -19,10 +22,13 @@ defmodule HTMLGenerators do
 
   def comment do
     ExUnitProperties.gen all(
-                           text <- StreamData.string(:alphanumeric),
+                           text <- StreamData.string(:ascii),
                            !String.starts_with?(text, ["<", "->"]),
                            !String.contains?(text, ["<!--", "-->", "--!>"]),
-                           !String.ends_with?(text, "<!-")
+                           !String.ends_with?(text, "<!-"),
+                           !Enum.any?(@keywords, fn keyword ->
+                             String.equivalent?(keyword, text)
+                           end)
                          ) do
       "<!--" <> text <> "-->"
     end
@@ -42,7 +48,10 @@ defmodule HTMLGenerators do
                                HTMLAttributes.get_attributes() ++
                                  HTMLAttributes.get_event_handler_attributes()
                              ),
-                           value <- StreamData.string(:alphanumeric)
+                           value <- StreamData.string(:alphanumeric),
+                           !Enum.any?(@keywords, fn keyword ->
+                             String.equivalent?(keyword, value)
+                           end)
                          ) do
       if String.length(value) != 0,
         do: name <> "=" <> quotation <> value <> quotation,
@@ -53,7 +62,7 @@ defmodule HTMLGenerators do
   def single_element do
     ExUnitProperties.gen all(
                            element_name <- StreamData.member_of(HTMLElements.get_elements()),
-                           content <- StreamData.string(:alphanumeric),
+                           content <- StreamData.string(:ascii),
                            attributes <- StreamData.list_of(attribute(), max_length: 3),
                            attributes_string <-
                              StreamData.constant(" " <> Enum.join(attributes, " ")),
@@ -65,7 +74,10 @@ defmodule HTMLGenerators do
                                  ">" <> content <> "</" <> element_name <> ">",
                                "<" <> element_name <> attributes_string <> "/>",
                                "<" <> element_name <> attributes_string <> ">"
-                             ])
+                             ]),
+                           !Enum.any?(@keywords, fn keyword ->
+                             String.equivalent?(keyword, content)
+                           end)
                          ) do
       element
     end
@@ -125,11 +137,14 @@ defmodule HTMLGenerators do
 
   def incorrect_comment do
     ExUnitProperties.gen all(
-                           text <- StreamData.string(:alphanumeric),
+                           text <- StreamData.string(:ascii),
                            start_text <- StreamData.member_of([">", "->", ""]),
                            contain_text <- StreamData.member_of(["<!--", "-->", "--!>", ""]),
                            end_text <- StreamData.member_of(["<!-", ""]),
-                           !Enum.all?([start_text, contain_text, end_text], &(&1 == ""))
+                           !Enum.all?([start_text, contain_text, end_text], &(&1 == "")),
+                           !Enum.any?(@keywords, fn keyword ->
+                             String.equivalent?(keyword, text)
+                           end)
                          ) do
       "<!--" <> start_text <> text <> contain_text <> end_text <> "-->"
     end
