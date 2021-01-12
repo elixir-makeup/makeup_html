@@ -21,17 +21,9 @@ defmodule Makeup.Lexers.HTMLLexer do
 
   wspace = ascii_string([?\r, ?\s, ?\n, ?\f], min: 1)
 
-  whitespace = wspace |> token(:whitespace)
-
-  # This is the combinator that ensures that the lexer will never reject a file
-  # because of invalid input syntax
-  any_char = utf8_char([]) |> token(:error)
+  insensitive_char = utf8_char([]) |> token(:char)
 
   keywords = Enum.map(@keywords, &keyword/1)
-
-  operators =
-    ascii_string([?=], 1)
-    |> token(:operator)
 
   doctype =
     "<!"
@@ -39,25 +31,16 @@ defmodule Makeup.Lexers.HTMLLexer do
     |> concat(anycase_string("DOCTYPE"))
     |> optional(wspace)
     |> concat(anycase_string("html"))
-    # optional doctype legacy string
+    # TODO: optional doctype legacy string
     |> optional(wspace)
     |> concat(string(">"))
     |> token(:keyword)
-
-  insensitive_string =
-    ascii_string([?a..?z, ?A..?Z, ?0..?9], 1)
-    |> optional(
-      ascii_string([?a..?z, ?_, ?0..?9, ?A..?Z, ?\r, ?\s, ?\n, ?\f, ?>, ?<, ?!], min: 1)
-    )
-    |> lexeme
-    |> token(:string)
 
   # Combinators that highlight expressions surrounded by a pair of delimiters.
   start_tag = many_surrounded_by(parsec(:root_element), "<", ">")
   end_tag = many_surrounded_by(parsec(:root_element), "</", ">")
   single_tag = many_surrounded_by(parsec(:root_element), "<", "/>")
   comment_tag = many_surrounded_by(parsec(:root_element), "<!--", "-->")
-  doctype_tag = many_surrounded_by(parsec(:root_element), "<!", ">")
   attribute_delimiters = many_surrounded_by(parsec(:root_element), "\"", "\"")
 
   # Tag the tokens with the language name.
@@ -71,22 +54,12 @@ defmodule Makeup.Lexers.HTMLLexer do
     choice(
       [
         doctype,
-        operators,
         # Delimiters
         comment_tag,
-        doctype_tag,
-        single_tag,
-        end_tag,
-        start_tag,
-        attribute_delimiters
+        # Unmatched
+        insensitive_char
       ] ++
-        keywords ++
-        [
-          insensitive_string,
-          whitespace,
-          # Error
-          any_char
-        ]
+        keywords
     )
 
   ##############################################################################
@@ -97,14 +70,14 @@ defmodule Makeup.Lexers.HTMLLexer do
 
   @inline Application.get_env(:makeup_html, :inline, false)
 
-  @impl Makeup.Lexer
+  # @impl Makeup.Lexer
   defparsec(
     :root_element,
     root_element_combinator |> map({__MODULE__, :__as_html_language__, []}),
     inline: @inline
   )
 
-  @impl Makeup.Lexer
+  # @impl Makeup.Lexer
   defparsec(
     :root,
     repeat(parsec(:root_element)),
@@ -114,10 +87,77 @@ defmodule Makeup.Lexers.HTMLLexer do
   ###################################################################
   # Step #2: postprocess the list of tokens
   ###################################################################
+  defp merge_string_helper([{_, _, string} | tokens], result) when is_list(string),
+    do: merge_string_helper(tokens, result ++ string)
 
-  # By default, return the list of tokens unchanged
+  defp merge_string_helper([{_, _, string} | tokens], result) when is_binary(string),
+    do: merge_string_helper(tokens, result ++ [string])
+
+  defp merge_string_helper([{_, _, string} | tokens], result) when is_integer(string),
+    do: merge_string_helper(tokens, result ++ [string])
+
+  defp merge_string_helper([], []), do: []
+  defp merge_string_helper([], result), do: [{:string, %{language: :html}, result}]
+
+  defp merge_string(stringlist), do: stringlist |> merge_string_helper([])
+
+  defp stringify_helper([{:char, _attr, _value} = token | tokens], charlist, result),
+    do: stringify_helper(tokens, charlist ++ [token], result)
+
+  defp stringify_helper([token | tokens], charlist, result),
+    do: stringify_helper(tokens, [], result ++ merge_string(charlist) ++ [token])
+
+  defp stringify_helper([], charlist, result), do: result ++ merge_string(charlist)
+
+  # commentify_helper(tokens, {group, queue}, result)
+  defp commentify_helper([{:punctuation, group, "<!--"} = token | tokens], {nil, []}, result),
+    do: commentify_helper(tokens, {group, [token]}, result)
+
+  defp commentify_helper([{:punctuation, group, "-->"} = token | tokens], {group, queue}, result) do
+    [{_type, _attr, string}] = merge_string(queue ++ [token])
+
+    comment_content =
+      string
+      |> List.to_string()
+      |> String.replace_prefix("<!--", "")
+      |> String.replace_suffix("-->", "")
+
+    if String.starts_with?(comment_content, [">", "->"]) or
+         String.contains?(comment_content, ["<!--", "-->", "--!>"]) or
+         String.ends_with?(comment_content, "<!-"),
+       do:
+         commentify_helper(
+           tokens,
+           {nil, []},
+           result ++ [{:string, %{language: :html}, string}]
+         ),
+       else:
+         commentify_helper(
+           tokens,
+           {nil, []},
+           result ++ [{:comment, %{language: :html}, string}]
+         )
+  end
+
+  defp commentify_helper([token | tokens], {nil, _}, result),
+    do: commentify_helper(tokens, {nil, []}, result ++ [token])
+
+  defp commentify_helper([token | tokens], {group, queue}, result),
+    do: commentify_helper(tokens, {group, queue ++ [token]}, result)
+
+  defp commentify_helper([], {_group, []}, result), do: result
+
+  defp commentify_helper([], {_group, queue}, result),
+    do: result ++ [{:string, %{language: :html}, merge_string(queue)}]
+
+  # Converts traces of the form "char"+ into a single string
+  defp stringify(tokens), do: tokens |> stringify_helper([], [])
+
+  # Convert traces of the form "<!--"-string-"-->" into a comment
+  defp commentify(tokens), do: tokens |> commentify_helper({nil, []}, [])
+
   @impl Makeup.Lexer
-  def postprocess(tokens, _opts \\ []), do: tokens
+  def postprocess(tokens, _opts \\ []), do: tokens |> stringify() |> commentify()
 
   #######################################################################
   # Step #3: highlight matching delimiters
@@ -127,14 +167,6 @@ defmodule Makeup.Lexers.HTMLLexer do
 
   @impl Makeup.Lexer
   defgroupmatcher(:match_groups,
-    start_tag: [
-      open: [[{:punctuation, _, "<"}]],
-      close: [[{:punctuation, _, ">"}]]
-    ],
-    end_tag: [
-      open: [[{:punctuation, _, "</"}]],
-      close: [[{:punctuation, _, ">"}]]
-    ],
     single_tag: [
       open: [[{:punctuation, _, "<"}]],
       close: [[{:punctuation, _, "/>"}]]
@@ -143,13 +175,17 @@ defmodule Makeup.Lexers.HTMLLexer do
       open: [[{:punctuation, _, "<!--"}]],
       close: [[{:punctuation, _, "-->"}]]
     ],
-    doctype_tag: [
-      open: [[{:punctuation, _, "<!"}]],
-      close: [[{:punctuation, _, ">"}]]
-    ],
     attribute_delimiters: [
       open: [[{:punctuation, _, "\""}]],
       close: [[{:punctuation, _, "\""}]]
+    ],
+    start_tag: [
+      open: [[{:punctuation, _, "<"}]],
+      close: [[{:punctuation, _, ">"}]]
+    ],
+    end_tag: [
+      open: [[{:punctuation, _, "</"}]],
+      close: [[{:punctuation, _, ">"}]]
     ]
   )
 

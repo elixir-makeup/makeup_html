@@ -5,7 +5,6 @@ defmodule Makeup.Lexers.HTMLLexer.Combinators do
 
   def keyword(string) do
     string
-    |> anycase_string
     |> token(:keyword)
   end
 
