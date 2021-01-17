@@ -5,7 +5,6 @@ defmodule HTMLLexerTokenizer do
   alias Makeup.Lexers.HTMLLexer
   alias Makeup.Lexer.Postprocess
   alias Helper
-  alias Makeup.Lexers.HTMLLexer.HTMLElements
 
   # This function has three purposes:
   # 1. Ensure deterministic lexer output (no random prefix)
@@ -108,43 +107,48 @@ defmodule HTMLLexerTokenizer do
     assert lex(comment) == [{:comment, %{}, "<!--My favorite operators are > and <!-->"}]
   end
 
-  # ###################################################################
-  # # Void element
-  # ###################################################################
-  # property "correct void_element does not produce errors" do
-  #   check all(void_element <- HTMLGenerators.void_element()) do
-  #     assert !Enum.any?(lex(void_element), &match?({:string, _, _}, &1))
-  #   end
-  # end
+  ###################################################################
+  # Void element
+  ###################################################################
+  property "correct void_element is correctly tokenized" do
+    check all(void_element <- HTMLGenerators.void_element()) do
+      element =
+        void_element
+        |> String.replace_prefix("<", "")
+        |> String.replace_suffix(">", "")
 
-  # property "incorrect void_element produces_errors" do
-  #   check all(void_element <- HTMLGenerators.incorrect_void_element()) do
-  #     assert Enum.any?(lex(void_element), &match?({:string, _, _}, &1))
-  #   end
-  # end
+      assert lex(void_element) == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:keyword, %{}, element},
+               {:punctuation, %{group_id: "group-1"}, ">"}
+             ]
+    end
+  end
 
-  # property "correct void_element is correctly tokenized" do
-  #   check all(element <- StreamData.member_of(HTMLElements.get_elements())) do
-  #     void_element = "<" <> element <> " >"
+  property "incorrect void_element is incorrectly tokenized" do
+    check all(void_element <- HTMLGenerators.incorrect_void_element()) do
+      element =
+        void_element
+        |> String.replace_prefix("<", "")
+        |> String.replace_suffix(">", "")
 
-  #     assert lex(void_element) == [
-  #              {:punctuation, %{group_id: "group-1"}, "<"},
-  #              {:keyword, %{}, element},
-  #              {:whitespace, %{}, " "},
-  #              {:punctuation, %{group_id: "group-1"}, ">"}
-  #            ]
-  #   end
-  # end
+      refute lex(void_element) == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:keyword, %{}, element},
+               {:punctuation, %{group_id: "group-1"}, ">"}
+             ]
+    end
+  end
 
-  # test "<hr>" do
-  #   void_element = "<hr>"
+  test "<hr>" do
+    void_element = "<hr>"
 
-  #   assert lex(void_element) == [
-  #            {:punctuation, %{group_id: "group-1"}, "<"},
-  #            {:keyword, %{}, "hr"},
-  #            {:punctuation, %{group_id: "group-1"}, ">"}
-  #          ]
-  # end
+    assert lex(void_element) == [
+             {:punctuation, %{group_id: "group-1"}, "<"},
+             {:keyword, %{}, "hr"},
+             {:punctuation, %{group_id: "group-1"}, ">"}
+           ]
+  end
 
   # ###################################################################
   # # Attribute
