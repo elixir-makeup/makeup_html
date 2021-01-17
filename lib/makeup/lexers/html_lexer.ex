@@ -10,20 +10,13 @@ defmodule Makeup.Lexers.HTMLLexer do
   import Makeup.Lexer.Groups
   import Makeup.Lexers.HTMLLexer.Combinators
   alias Makeup.Lexers.HTMLLexer.HTMLElements
-  alias Makeup.Lexers.HTMLLexer.HTMLAttributes
-
-  @keywords HTMLElements.get_elements() ++
-              HTMLAttributes.get_attributes() ++ HTMLAttributes.get_event_handler_attributes()
 
   ###################################################################
   # Step #1: tokenize the input (into a list of tokens)
   ###################################################################
-
   wspace = ascii_string([?\r, ?\s, ?\n, ?\f], min: 1)
 
   insensitive_char = utf8_char([]) |> token(:char)
-
-  keywords = Enum.map(@keywords, &keyword/1)
 
   doctype =
     "<!"
@@ -37,11 +30,21 @@ defmodule Makeup.Lexers.HTMLLexer do
     |> token(:keyword)
 
   # Combinators that highlight expressions surrounded by a pair of delimiters.
-  start_tag = many_surrounded_by(parsec(:root_element), "<", ">")
-  end_tag = many_surrounded_by(parsec(:root_element), "</", ">")
-  single_tag = many_surrounded_by(parsec(:root_element), "<", "/>")
   comment_tag = many_surrounded_by(parsec(:root_element), "<!--", "-->")
-  attribute_delimiters = many_surrounded_by(parsec(:root_element), "\"", "\"")
+
+  # Single punctuation symbols
+  open_tag =
+    "<"
+    |> string()
+    |> token(:punctuation)
+
+  close_tag =
+    ">"
+    |> string()
+    |> token(:punctuation)
+
+  # Keywords
+  elements = Enum.map(HTMLElements.get_elements(), &keyword/1)
 
   # Tag the tokens with the language name.
   # This makes it easier to postprocess files with multiple languages.
@@ -56,10 +59,14 @@ defmodule Makeup.Lexers.HTMLLexer do
         doctype,
         # Delimiters
         comment_tag,
-        # Unmatched
-        insensitive_char
+        open_tag,
+        close_tag
       ] ++
-        keywords
+        elements ++
+        [
+          # Unmatched
+          insensitive_char
+        ]
     )
 
   ##############################################################################
@@ -67,7 +74,6 @@ defmodule Makeup.Lexers.HTMLLexer do
   # embed this lexer into another lexer, but other than that, they are not
   # meant to be used by end-users
   ##############################################################################
-
   @inline Application.get_env(:makeup_html, :inline, false)
 
   # @impl Makeup.Lexer
@@ -109,7 +115,6 @@ defmodule Makeup.Lexers.HTMLLexer do
 
   defp stringify_helper([], charlist, result), do: result ++ merge_string(charlist)
 
-  # commentify_helper(tokens, {group, queue}, result)
   defp commentify_helper([{:punctuation, group, "<!--"} = token | tokens], {nil, []}, result),
     do: commentify_helper(tokens, {group, [token]}, result)
 
@@ -148,7 +153,7 @@ defmodule Makeup.Lexers.HTMLLexer do
   defp commentify_helper([], {_group, []}, result), do: result
 
   defp commentify_helper([], {_group, queue}, result),
-    do: result ++ [{:string, %{language: :html}, merge_string(queue)}]
+    do: result ++ merge_string(queue)
 
   # Converts traces of the form "char"+ into a single string
   defp stringify(tokens), do: tokens |> stringify_helper([], [])
@@ -161,30 +166,15 @@ defmodule Makeup.Lexers.HTMLLexer do
 
   #######################################################################
   # Step #3: highlight matching delimiters
-  # By default, this includes delimiters that are used in many languages,
-  # but feel free to delete these or add more.
   #######################################################################
-
   @impl Makeup.Lexer
   defgroupmatcher(:match_groups,
-    single_tag: [
-      open: [[{:punctuation, _, "<"}]],
-      close: [[{:punctuation, _, "/>"}]]
-    ],
     comment_tag: [
       open: [[{:punctuation, _, "<!--"}]],
       close: [[{:punctuation, _, "-->"}]]
     ],
-    attribute_delimiters: [
-      open: [[{:punctuation, _, "\""}]],
-      close: [[{:punctuation, _, "\""}]]
-    ],
     start_tag: [
       open: [[{:punctuation, _, "<"}]],
-      close: [[{:punctuation, _, ">"}]]
-    ],
-    end_tag: [
-      open: [[{:punctuation, _, "</"}]],
       close: [[{:punctuation, _, ">"}]]
     ]
   )
