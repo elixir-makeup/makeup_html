@@ -3,10 +3,7 @@ defmodule Makeup.Lexers.HTMLLexer.Combinators do
   import NimbleParsec
   import Makeup.Lexer.Combinators
 
-  def keyword(string) do
-    string
-    |> token(:keyword)
-  end
+  def keyword(string), do: string |> token(:keyword)
 
   # Insensitive string
   # https://elixirforum.com/t/nimbleparsec-case-insensitive-matches/14339/2

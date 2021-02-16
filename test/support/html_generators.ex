@@ -6,26 +6,46 @@ defmodule HTMLGenerators do
   alias Makeup.Lexers.HTMLLexer.HTMLAttributes
   alias Helper
 
-  # TODO: optional doctype legacy string
+  @keywords HTMLElements.get_elements() ++
+              HTMLAttributes.get_attributes() ++ HTMLAttributes.get_event_handler_attributes()
+
+  def doctype_legacy_string do
+    ExUnitProperties.gen all(
+                           one_or_more <- StreamData.integer(1..5),
+                           quotation <- StreamData.member_of(["\"", "\'"])
+                         ) do
+      String.duplicate(" ", one_or_more) <>
+        Helper.insensitive_case_string("SYSTEM") <>
+        String.duplicate(" ", one_or_more) <> quotation <> "about:legacy-compat" <> quotation
+    end
+  end
+
   def doctype do
     ExUnitProperties.gen all(
                            one_or_more <- StreamData.integer(1..5),
-                           optional <- StreamData.integer(0..5)
+                           optional <- StreamData.integer(0..5),
+                           legacy_string <- doctype_legacy_string()
                          ) do
       "<!" <>
         Helper.insensitive_case_string("DOCTYPE") <>
         String.duplicate(" ", one_or_more) <>
-        Helper.insensitive_case_string("html") <> String.duplicate(" ", optional) <> ">"
+        Helper.insensitive_case_string("html") <>
+        legacy_string <>
+        String.duplicate(" ", optional) <> ">"
     end
   end
 
   def comment do
-    ExUnitProperties.gen all(
-                           text <- StreamData.string(:ascii),
-                           !String.starts_with?(text, [">", "->"]),
-                           !String.contains?(text, ["<!--", "-->", "--!>"]),
-                           !String.ends_with?(text, "<!-")
-                         ) do
+    ExUnitProperties.gen all(gen_text <- StreamData.string(:ascii)) do
+      text =
+        gen_text
+        |> String.replace_leading(">", "")
+        |> String.replace_leading("->", "")
+        |> String.replace("<!--", "")
+        |> String.replace("-->", "")
+        |> String.replace("--!>", "")
+        |> String.replace_trailing("<!-", "")
+
       "<!--" <> text <> "-->"
     end
   end
@@ -39,12 +59,38 @@ defmodule HTMLGenerators do
   def attribute do
     ExUnitProperties.gen all(
                            quotation <- StreamData.member_of(["\"", "\'", ""]),
+                           single_name <-
+                             StreamData.member_of(
+                               (HTMLAttributes.get_attributes() ++
+                                  HTMLAttributes.get_event_handler_attributes())
+                               |> MapSet.new()
+                               |> MapSet.difference(MapSet.new(HTMLElements.get_elements()))
+                               |> MapSet.to_list()
+                             ),
                            name <-
                              StreamData.member_of(
                                HTMLAttributes.get_attributes() ++
                                  HTMLAttributes.get_event_handler_attributes()
                              ),
-                           value <- StreamData.string(:alphanumeric)
+                           value <- StreamData.string(:alphanumeric),
+                           !Enum.any?(@keywords, &(&1 == value))
+                         ) do
+      if String.length(value) != 0,
+        do: name <> "=" <> quotation <> value <> quotation,
+        else: single_name
+    end
+  end
+
+  def element_attribute do
+    ExUnitProperties.gen all(
+                           quotation <- StreamData.member_of(["\"", "\'", ""]),
+                           name <-
+                             StreamData.member_of(
+                               HTMLAttributes.get_attributes() ++
+                                 HTMLAttributes.get_event_handler_attributes()
+                             ),
+                           value <- StreamData.string(:alphanumeric),
+                           !Enum.any?(@keywords, &(&1 == value))
                          ) do
       if String.length(value) != 0,
         do: name <> "=" <> quotation <> value <> quotation,
@@ -56,7 +102,7 @@ defmodule HTMLGenerators do
     ExUnitProperties.gen all(
                            element_name <- StreamData.member_of(HTMLElements.get_elements()),
                            content <- StreamData.string(:ascii),
-                           attributes <- StreamData.list_of(attribute(), max_length: 3),
+                           attributes <- StreamData.list_of(element_attribute(), max_length: 3),
                            attributes_string <-
                              StreamData.constant(" " <> Enum.join(attributes, " ")),
                            element <-
@@ -64,7 +110,12 @@ defmodule HTMLGenerators do
                                "<" <>
                                  element_name <>
                                  attributes_string <>
-                                 ">" <> content <> "</" <> element_name <> ">",
+                                 ">" <>
+                                 (content
+                                  |> String.replace("<", "")
+                                  # TODO: Element content can contain ">"
+                                  |> String.replace(">", "")) <>
+                                 "</" <> element_name <> ">",
                                "<" <> element_name <> attributes_string <> "/>",
                                "<" <> element_name <> attributes_string <> ">"
                              ])
@@ -77,7 +128,7 @@ defmodule HTMLGenerators do
     ExUnitProperties.gen all(
                            element_name <- StreamData.member_of(HTMLElements.get_elements()),
                            content <- StreamData.one_of([void_element(), single_element()]),
-                           attributes <- StreamData.list_of(attribute(), max_length: 3)
+                           attributes <- StreamData.list_of(element_attribute(), max_length: 3)
                          ) do
       "<" <>
         element_name <>
@@ -145,9 +196,9 @@ defmodule HTMLGenerators do
   end
 
   def incorrect_attribute do
-    ExUnitProperties.gen all(attribute <- attribute()) do
+    ExUnitProperties.gen all(attribute <- element_attribute()) do
       attribute
-      |> String.replace_suffix("\"", "")
+      |> String.slice(0..0)
     end
   end
 
