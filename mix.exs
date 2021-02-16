@@ -39,7 +39,8 @@ defmodule MakeupHTML.Mixfile do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger],
+      mod: {Makeup.Lexers.HTMLLexer.Application, []}
     ]
   end
 
@@ -50,8 +51,7 @@ defmodule MakeupHTML.Mixfile do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:makeup, "~> 0.5.0"},
-      {:ex_doc, "~> 0.18.3", only: [:dev]},
+      {:makeup, "~> 1.0"},
       {:stream_data, "~> 0.5.0", only: :test}
     ]
   end
