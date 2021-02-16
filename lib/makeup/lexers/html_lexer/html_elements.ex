@@ -1,4 +1,4 @@
-defmodule HTMLElements do
+defmodule Makeup.Lexers.HTMLLexer.HTMLElements do
   # HTML5 Elements
   # https://html.spec.whatwg.org/multipage/indices.html#elements-3
   @elements [

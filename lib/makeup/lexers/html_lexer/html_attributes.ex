@@ -1,4 +1,4 @@
-defmodule HTMLAttributes do
+defmodule Makeup.Lexers.HTMLLexer.HTMLAttributes do
   # HTML5 Attributes
   # https://html.spec.whatwg.org/multipage/indices.html#attributes-3
   @attributes [
@@ -32,7 +32,6 @@ defmodule HTMLAttributes do
     "data",
     "datetime",
     "decoding",
-    "loading",
     "default",
     "defer",
     "dir",
@@ -72,6 +71,7 @@ defmodule HTMLAttributes do
     "label",
     "lang",
     "list",
+    "loading",
     "loop",
     "low",
     "manifest",
@@ -131,8 +131,8 @@ defmodule HTMLAttributes do
 
   @event_handler_attributes [
     "onabort",
-    "onauxclick",
     "onafterprint",
+    "onauxclick",
     "onbeforeprint",
     "onbeforeunload",
     "onblur",
@@ -192,9 +192,9 @@ defmodule HTMLAttributes do
     "onpopstate",
     "onprogress",
     "onratechange",
+    "onrejectionhandled",
     "onreset",
     "onresize",
-    "onrejectionhandled",
     "onscroll",
     "onsecuritypolicyviolation",
     "onseeked",
