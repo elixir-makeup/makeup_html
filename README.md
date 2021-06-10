@@ -1,6 +1,6 @@
 # MakeupHTML
 
-[![Build Status](https://github.com/elixir-makeup/makeup_html/workflows/CI/badge.svg)](https://github.com/elixir-makeup/makeup_html/actions)
+![CI](https://github.com/elixir-makeup/makeup_html/actions/workflows/ci.yml/badge.svg)
 
 A [Makeup](https://github.com/elixir-makeup/makeup/) lexer for the `HTML` language.
 
