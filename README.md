@@ -1,11 +1,12 @@
 # MakeupHTML
 
-Lexer for the HTML language for Makeup.
+[![Build Status](https://github.com/elixir-makeup/makeup_html/workflows/CI/badge.svg)](https://github.com/elixir-makeup/makeup_html/actions)
+
+A [Makeup](https://github.com/elixir-makeup/makeup/) lexer for the `HTML` language.
 
 ## Installation
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `makeup_html` to your list of dependencies in `mix.exs`:
+Add `makeup_html` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
@@ -15,7 +16,4 @@ def deps do
 end
 ```
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at [https://hexdocs.pm/makeup_html](https://hexdocs.pm/makeup_lexer).
-
+The lexer will automatically register itself with `Makeup` for the HTML language as well as the `.html` extension.

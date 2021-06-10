@@ -30,9 +30,9 @@ defmodule MakeupHTML.Mixfile do
   defp package do
     [
       name: :makeup_html,
-      licenses: ["BSD"],
+      licenses: ["MIT"],
       maintainers: ["Javier Garea <javigarea@gmail.com>"],
-      links: %{"GitHub" => "https://github.com/javiergarea/makeup_html"}
+      links: %{"GitHub" => "https://github.com/elixir-makeup/makeup_html"}
     ]
   end
 
@@ -52,7 +52,8 @@ defmodule MakeupHTML.Mixfile do
   defp deps do
     [
       {:makeup, "~> 1.0"},
-      {:stream_data, "~> 0.5.0", only: :test}
+      {:stream_data, "~> 0.5.0", only: :test},
+      {:ex_doc, "~> 0.24", only: :dev, runtime: false}
     ]
   end
 end
