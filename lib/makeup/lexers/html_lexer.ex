@@ -345,7 +345,7 @@ defmodule Makeup.Lexers.HTMLLexer do
          queue,
          result
        ),
-       do: element_stringify(tokens, true, [], result ++ [merge_string(queue), punctuation])
+       do: element_stringify(tokens, true, [], result ++ merge_string(queue) ++ [punctuation])
 
   # We respect the comments
   defp element_stringify(
@@ -354,7 +354,7 @@ defmodule Makeup.Lexers.HTMLLexer do
          queue,
          result
        ),
-       do: element_stringify(tokens, true, [], result ++ [merge_string(queue), comment])
+       do: element_stringify(tokens, true, [], result ++ merge_string(queue) ++ [comment])
 
   defp element_stringify(
          [{:punctuation, _, "</"} = punctuation | tokens],
@@ -362,7 +362,7 @@ defmodule Makeup.Lexers.HTMLLexer do
          queue,
          result
        ),
-       do: element_stringify(tokens, false, [], result ++ [merge_string(queue), punctuation])
+       do: element_stringify(tokens, false, [], result ++ merge_string(queue) ++ [punctuation])
 
   defp element_stringify(
          [{:punctuation, _, "<"} = punctuation | tokens],
@@ -370,7 +370,7 @@ defmodule Makeup.Lexers.HTMLLexer do
          queue,
          result
        ),
-       do: element_stringify(tokens, false, [], result ++ [merge_string(queue), punctuation])
+       do: element_stringify(tokens, false, [], result ++ merge_string(queue) ++ [punctuation])
 
   defp element_stringify([token | tokens], false, _, result),
     do: element_stringify(tokens, false, [], result ++ [token])
