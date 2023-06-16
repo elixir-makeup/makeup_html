@@ -132,7 +132,7 @@ defmodule Makeup.Lexers.HTMLLexer do
   # embed this lexer into another lexer, but other than that, they are not
   # meant to be used by end-users
   ##############################################################################
-  @inline Application.get_env(:makeup_html, :inline, false)
+  @inline Application.compile_env(:makeup_html, :inline, false)
 
   # @impl Makeup.Lexer
   defparsec(
