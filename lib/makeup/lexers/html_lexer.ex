@@ -64,7 +64,7 @@ defmodule Makeup.Lexers.HTMLLexer do
     |> token(:operator)
 
   # Combinators that highlight expressions surrounded by a pair of delimiters.
-  comment_tag = many_surrounded_by(parsec(:root_element), "<!--", "-->")
+  comment_tag = many_surrounded_by(parsec(:root_element), "<!--", "-->", eos: false)
 
   # Single punctuation symbols
   open_tag =
