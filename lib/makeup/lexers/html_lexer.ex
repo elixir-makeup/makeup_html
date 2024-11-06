@@ -188,6 +188,26 @@ defmodule Makeup.Lexers.HTMLLexer do
   defp attributify(tokens),
     do: tokens |> attributify(false, [])
 
+  # when using the HTMLLexer from HEEx, we often have to deal with
+  # strings like <div class=>...</div> where an attribute starts, but is missing
+  # a value. We special case this "missing attribute value" case here to avoid
+  # formatting the closing tag as an attribute.
+  defp attributify(
+         [
+           {:keyword, attr, value},
+           {:operator, _, _} = operator,
+           {:punctuation, attr2, value2} | tokens
+         ],
+         _flag,
+         result
+       ),
+       do:
+         attributify(
+           tokens,
+           false,
+           result ++ [{:name_attribute, attr, value}, operator, {:punctuation, attr2, value2}]
+         )
+
   defp attributify(
          [
            {:keyword, attr, value},
@@ -222,6 +242,9 @@ defmodule Makeup.Lexers.HTMLLexer do
          )
 
   defp attributify([{:punctuation, _, ">"} = punctuation | tokens], true, result),
+    do: attributify(tokens, false, result ++ [punctuation])
+
+  defp attributify([{:punctuation, _, "/>"} = punctuation | tokens], true, result),
     do: attributify(tokens, false, result ++ [punctuation])
 
   defp attributify([{:keyword, attr, value} | tokens], true, result),
