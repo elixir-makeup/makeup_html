@@ -4,7 +4,7 @@ defmodule MakeupHTML.Mixfile do
   def project do
     [
       app: :makeup_html,
-      version: "0.1.1",
+      version: "0.1.2",
       elixir: "~> 1.10",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -39,7 +39,7 @@ defmodule MakeupHTML.Mixfile do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger],
+      extra_applications: [],
       mod: {Makeup.Lexers.HTMLLexer.Application, []}
     ]
   end
