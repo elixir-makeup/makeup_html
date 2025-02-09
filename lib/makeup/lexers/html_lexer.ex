@@ -148,25 +148,6 @@ defmodule Makeup.Lexers.HTMLLexer do
   # Step #2: postprocess the list of tokens
   ###################################################################
 
-  ###
-  # Merges a list of tokens into a single 'string' token
-  ###
-  defp merge_string([{_, _, string} | tokens], result) when is_list(string),
-    do: merge_string(tokens, result ++ string)
-
-  defp merge_string([{_, _, string} | tokens], result) when is_binary(string),
-    do: merge_string(tokens, result ++ [string])
-
-  defp merge_string([{_, _, string} | tokens], result) when is_integer(string),
-    do: merge_string(tokens, result ++ [string])
-
-  defp merge_string([], []), do: []
-  defp merge_string([], result), do: [{:string, %{language: :html}, result}]
-
-  defp merge_string(stringlist), do: stringlist |> merge_string([])
-
-  # Merging
-
   # Converts traces of the form [char]+ into a single string
   # Converts keywords before and after strings into a single string
 
@@ -262,59 +243,39 @@ defmodule Makeup.Lexers.HTMLLexer do
 
   defp attributify([], _), do: []
 
-  ##
   # Converts the content of an element into a string
-  ##
-  defp element_stringify(tokens), do: tokens |> element_stringify(false, [], [])
 
-  defp element_stringify(
-         [{:punctuation, _, ">"} = punctuation | tokens],
-         _,
-         queue,
-         result
-       ),
-       do: element_stringify(tokens, true, [], result ++ merge_string(queue) ++ [punctuation])
+  defp buffer_to_acc("", acc), do: acc
+  defp buffer_to_acc(string, acc), do: [{:string, %{language: :html}, string} | acc]
+
+  defp stringify([{:punctuation, _, ">"} = punctuation | tokens], _, buffer),
+    do: buffer_to_acc(buffer, [punctuation | stringify(tokens, true, "")])
 
   # We respect the comments
-  defp element_stringify(
-         [{:comment, _, _} = comment | tokens],
-         _,
-         queue,
-         result
-       ),
-       do: element_stringify(tokens, true, [], result ++ merge_string(queue) ++ [comment])
+  defp stringify([{:comment, _, _} = comment | tokens], _, buffer),
+    do: buffer_to_acc(buffer, [comment | stringify(tokens, true, "")])
 
-  defp element_stringify(
-         [{:punctuation, _, "</"} = punctuation | tokens],
-         true,
-         queue,
-         result
-       ),
-       do: element_stringify(tokens, false, [], result ++ merge_string(queue) ++ [punctuation])
+  defp stringify([{:punctuation, _, "</"} = punctuation | tokens], true, buffer),
+    do: buffer_to_acc(buffer, [punctuation | stringify(tokens, false, "")])
 
-  defp element_stringify(
-         [{:punctuation, _, "<"} = punctuation | tokens],
-         true,
-         queue,
-         result
-       ),
-       do: element_stringify(tokens, false, [], result ++ merge_string(queue) ++ [punctuation])
+  defp stringify([{:punctuation, _, "<"} = punctuation | tokens], true, buffer),
+    do: buffer_to_acc(buffer, [punctuation | stringify(tokens, false, "")])
 
-  defp element_stringify([token | tokens], false, _, result),
-    do: element_stringify(tokens, false, [], result ++ [token])
+  defp stringify([token | tokens], false, buffer),
+    do: [token | stringify(tokens, false, buffer)]
 
-  defp element_stringify([token | tokens], true, queue, result),
-    do: element_stringify(tokens, true, queue ++ [token], result)
+  defp stringify([{_, _, value} | tokens], true, buffer),
+    do: stringify(tokens, true, buffer <> value)
 
-  defp element_stringify([], _, queue, result),
-    do: result ++ queue
+  defp stringify([], _, buffer),
+    do: buffer_to_acc(buffer, [])
 
   @impl Makeup.Lexer
   def postprocess(tokens, _opts \\ []) do
     tokens
     |> merge()
     |> attributify(false)
-    |> element_stringify()
+    |> stringify(false, "")
   end
 
   #######################################################################

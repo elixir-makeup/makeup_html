@@ -471,7 +471,7 @@ defmodule HTMLLexerTokenizer do
                {:punctuation, %{group_id: "group-10"}, "</"},
                {:name_tag, %{}, "html"},
                {:punctuation, %{group_id: "group-10"}, ">"},
-               {:whitespace, %{}, "\n"}
+               {:string, %{}, "\n"}
              ]
     end
   end
@@ -622,7 +622,7 @@ defmodule HTMLLexerTokenizer do
              {:punctuation, %{group_id: "group-11"}, "</"},
              {:name_tag, %{}, "label"},
              {:punctuation, %{group_id: "group-11"}, ">"},
-             {:whitespace, %{}, "\n"}
+             {:string, %{}, "\n"}
            ] = lex(element)
   end
 end
