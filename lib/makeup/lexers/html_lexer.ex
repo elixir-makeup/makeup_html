@@ -10,9 +10,7 @@ defmodule Makeup.Lexers.HTMLLexer do
   import Makeup.Lexer.Groups
   import Makeup.Lexers.HTMLLexer.Combinators
 
-  @attributes (get_attributes() ++ get_event_handler_attributes())
-              |> Enum.sort_by(&String.length/1)
-              |> Enum.reverse()
+  @attributes MapSet.new(get_attributes() ++ get_event_handler_attributes())
 
   ###################################################################
   # Step #1: tokenize the input (into a list of tokens)
@@ -95,7 +93,7 @@ defmodule Makeup.Lexers.HTMLLexer do
     |> concat(name_tag)
 
   # Currently we match attributes anywhere in the text
-  attributes = Enum.map(@attributes, &keyword/1)
+  attributes = utf8_string([?a..?z, ?A..?Z, ?0..?9, ?_, ?-, ?:, ?.], min: 1) |> token(:keyword)
 
   # Unmatched
   insensitive_char = utf8_char([]) |> token(:char)
@@ -108,27 +106,22 @@ defmodule Makeup.Lexers.HTMLLexer do
   end
 
   root_element_combinator =
-    choice(
-      [
-        # Doctype
-        doctype,
-        # Operators
-        operators,
-        # Delimiters
-        comment_tag,
-        open_closing_tag,
-        open_tag,
-        close_self_tag,
-        close_tag,
-        # Whitespaces
-        whitespace
-      ] ++
-        attributes ++
-        [
-          # Unmatched
-          insensitive_char
-        ]
-    )
+    choice([
+      # Doctype
+      doctype,
+      # Operators
+      operators,
+      # Delimiters
+      comment_tag,
+      open_closing_tag,
+      open_tag,
+      close_self_tag,
+      close_tag,
+      # Text
+      whitespace,
+      attributes,
+      insensitive_char
+    ])
 
   ##############################################################################
   # Semi-public API: these two functions can be used by someone who wants to
@@ -175,15 +168,16 @@ defmodule Makeup.Lexers.HTMLLexer do
   ###
   # Converts traces of the form [char]+ into a single string
   ###
-  defp char_stringify(tokens), do: tokens |> char_stringify([], [])
+  defp char_stringify([{:char, attr, value} | tokens]),
+    do: char_stringify([{:string, attr, <<value::utf8>>} | tokens])
 
-  defp char_stringify([{:char, _attr, _value} = token | tokens], charlist, result),
-    do: char_stringify(tokens, charlist ++ [token], result)
+  defp char_stringify([{:string, attr, value1}, {:char, _attr, value2} | tokens]),
+    do: char_stringify([{:string, attr, <<value1::binary, value2::utf8>>} | tokens])
 
-  defp char_stringify([token | tokens], charlist, result),
-    do: char_stringify(tokens, [], result ++ merge_string(charlist) ++ [token])
+  defp char_stringify([token | tokens]),
+    do: [token | char_stringify(tokens)]
 
-  defp char_stringify([], charlist, result), do: result ++ merge_string(charlist)
+  defp char_stringify([]), do: []
 
   ###
   # Converts the proper keywords into attributes
@@ -252,7 +246,7 @@ defmodule Makeup.Lexers.HTMLLexer do
     attribute =
       if Enum.member?(@attributes, value),
         do: {:name_attribute, attr, value},
-        else: {:keyword, attr, value}
+        else: {:string, attr, value}
 
     attributify(tokens, flag, result ++ [attribute])
   end
