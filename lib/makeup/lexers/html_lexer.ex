@@ -47,7 +47,7 @@ defmodule Makeup.Lexers.HTMLLexer do
     |> optional(legacy_doctype_string)
     |> optional(wspace)
     |> concat(string(">"))
-    |> token(:keyword)
+    |> token(:comment_preproc)
 
   # Operators
   operators =

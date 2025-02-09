@@ -71,26 +71,28 @@ defmodule HTMLLexerTokenizer do
   describe "DOCTYPE" do
     property "correct DOCTYPE is correctly tokenized" do
       check all(doctype <- HTMLGenerators.doctype()) do
-        assert lex(doctype) == [{:keyword, %{}, doctype}]
+        assert lex(doctype) == [{:comment_preproc, %{}, doctype}]
       end
     end
 
     property "incorrect DOCTYPE is incorrectly tokenized" do
       check all(doctype <- HTMLGenerators.incorrect_doctype()) do
-        refute lex(doctype) == [{:keyword, %{}, doctype}]
+        refute lex(doctype) == [{:comment_preproc, %{}, doctype}]
       end
     end
 
     test "<!DOCTYPE html>" do
       doctype = "<!DOCTYPE html>"
 
-      assert lex(doctype) == [{:keyword, %{}, "<!DOCTYPE html>"}]
+      assert lex(doctype) == [{:comment_preproc, %{}, "<!DOCTYPE html>"}]
     end
 
     test "<!DOCTYPE html SYSTEM 'about:legacy-compat'>" do
       doctype = "<!DOCTYPE html SYSTEM 'about:legacy-compat'>"
 
-      assert lex(doctype) == [{:keyword, %{}, "<!DOCTYPE html SYSTEM 'about:legacy-compat'>"}]
+      assert lex(doctype) == [
+               {:comment_preproc, %{}, "<!DOCTYPE html SYSTEM 'about:legacy-compat'>"}
+             ]
     end
   end
 
@@ -426,7 +428,7 @@ defmodule HTMLLexerTokenizer do
       """
 
       assert lex(document) == [
-               {:keyword, %{}, "<!DOCTYPE HTML>"},
+               {:comment_preproc, %{}, "<!DOCTYPE HTML>"},
                {:whitespace, %{}, "\n  "},
                {:punctuation, %{group_id: "group-1"}, "<"},
                {:name_tag, %{}, "html"},
