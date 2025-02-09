@@ -165,25 +165,49 @@ defmodule Makeup.Lexers.HTMLLexer do
 
   defp merge_string(stringlist), do: stringlist |> merge_string([])
 
-  ###
+  # Merging
+
   # Converts traces of the form [char]+ into a single string
-  ###
-  defp char_stringify([{:char, attr, value} | tokens]),
-    do: char_stringify([{:string, attr, <<value::utf8>>} | tokens])
+  # Converts keywords before and after strings into a single string
 
-  defp char_stringify([{:string, attr, value1}, {:char, _attr, value2} | tokens]),
-    do: char_stringify([{:string, attr, <<value1::binary, value2::utf8>>} | tokens])
+  defp merge([{:char, attr, value} | tokens]),
+    do: merge([{:string, attr, <<value::utf8>>} | tokens])
 
-  defp char_stringify([token | tokens]),
-    do: [token | char_stringify(tokens)]
+  defp merge([{tag, attr, value1}, {:char, _attr, value2} | tokens])
+       when tag in [:keyword, :string],
+       do: merge([{:string, attr, <<value1::binary, value2::utf8>>} | tokens])
 
-  defp char_stringify([]), do: []
+  defp merge([{tag, attr, value1}, {:keyword, _attr, value2} | tokens])
+       when tag in [:keyword, :string],
+       do: merge([{:string, attr, value1 <> value2} | tokens])
 
-  ###
+  defp merge([{tag, attr, value1}, {:string, _attr, value2} | tokens])
+       when tag in [:keyword, :string],
+       do: merge([{:string, attr, value1 <> value2} | tokens])
+
+  defp merge([token | tokens]),
+    do: [token | merge(tokens)]
+
+  defp merge([]), do: []
+
   # Converts the proper keywords into attributes
-  ###
-  defp attributify(tokens),
-    do: tokens |> attributify(false, [])
+
+  defp attributify(
+         [
+           {:punctuation, _, "<"} = punctuation,
+           {:name_tag, _, _} = name_tag,
+           {:whitespace, _, _} = whitespace | tokens
+         ],
+         _
+       ) do
+    [punctuation, name_tag, whitespace | attributify(tokens, true)]
+  end
+
+  defp attributify([{:punctuation, _, ">"} = punctuation | tokens], _flag),
+    do: [punctuation | attributify(tokens, false)]
+
+  defp attributify([{:punctuation, _, "/>"} = punctuation | tokens], _flag),
+    do: [punctuation | attributify(tokens, false)]
 
   # when using the HTMLLexer from HEEx, we often have to deal with
   # strings like <div class=>...</div> where an attribute starts, but is missing
@@ -195,14 +219,14 @@ defmodule Makeup.Lexers.HTMLLexer do
            {:operator, _, _} = operator,
            {:punctuation, attr2, value2} | tokens
          ],
-         _flag,
-         result
+         true
        ) do
-    attributify(
-      tokens,
-      false,
-      result ++ [{:name_attribute, attr, value}, operator, {:punctuation, attr2, value2}]
-    )
+    [
+      {:name_attribute, attr, value},
+      operator,
+      {:punctuation, attr2, value2}
+      | attributify(tokens, false)
+    ]
   end
 
   defp attributify(
@@ -211,95 +235,32 @@ defmodule Makeup.Lexers.HTMLLexer do
            {:operator, _, _} = operator,
            {_, attr2, value2} | tokens
          ],
-         flag,
-         result
+         true
        ) do
-    attributify(
-      tokens,
-      flag,
-      result ++ [{:name_attribute, attr, value}, operator, {:string, attr2, value2}]
-    )
+    [
+      {:name_attribute, attr, value},
+      operator,
+      {:string, attr2, value2}
+      | attributify(tokens, true)
+    ]
   end
 
-  defp attributify(
-         [
-           {:punctuation, _, "<"} = punctuation,
-           {:name_tag, _, _} = name_tag,
-           {:whitespace, _, _} = whitespace | tokens
-         ],
-         _,
-         result
-       ) do
-    attributify(tokens, true, result ++ [punctuation, name_tag, whitespace])
-  end
+  defp attributify([{:keyword, attr, value} | tokens], true),
+    do: [{:name_attribute, attr, value} | attributify(tokens, true)]
 
-  defp attributify([{:punctuation, _, ">"} = punctuation | tokens], true, result),
-    do: attributify(tokens, false, result ++ [punctuation])
-
-  defp attributify([{:punctuation, _, "/>"} = punctuation | tokens], true, result),
-    do: attributify(tokens, false, result ++ [punctuation])
-
-  defp attributify([{:keyword, attr, value} | tokens], true, result),
-    do: attributify(tokens, true, result ++ [{:name_attribute, attr, value}])
-
-  defp attributify([{:keyword, attr, value} | tokens], flag, result) do
+  defp attributify([{:keyword, attr, value} | tokens], flag) do
     attribute =
       if Enum.member?(@attributes, value),
         do: {:name_attribute, attr, value},
         else: {:string, attr, value}
 
-    attributify(tokens, flag, result ++ [attribute])
+    [attribute | attributify(tokens, flag)]
   end
 
-  defp attributify([token | tokens], flag, result),
-    do: attributify(tokens, flag, result ++ [token])
+  defp attributify([token | tokens], flag),
+    do: [token | attributify(tokens, flag)]
 
-  defp attributify([], _, result), do: result
-
-  ###
-  # Converts traces of the forms
-  # string[keyword]+
-  # keyword[keyword]+
-  # [keyword]+string
-  # into a single string
-  ###
-  defp keyword_stringify(tokens), do: tokens |> keyword_stringify([], [])
-
-  defp keyword_stringify(
-         [{:string, _, _} = string, {:keyword, _, _} = keyword | tokens],
-         queue,
-         result
-       ),
-       do: keyword_stringify(tokens, queue ++ [string, keyword], result)
-
-  defp keyword_stringify(
-         [{:keyword, _, _} = keyword, {:string, _, _} = string | tokens],
-         queue,
-         result
-       ),
-       do: keyword_stringify(tokens, queue ++ [keyword, string], result)
-
-  defp keyword_stringify(
-         [{:keyword, _, _} = keyword1, {:keyword, _, _} = keyword2 | tokens],
-         queue,
-         result
-       ),
-       do: keyword_stringify(tokens, queue ++ [keyword1, keyword2], result)
-
-  defp keyword_stringify([{:keyword, _, _} = token | tokens], [], result),
-    do: keyword_stringify(tokens, [], result ++ [token])
-
-  defp keyword_stringify([{:keyword, _, _} = token | tokens], queue, result),
-    do: keyword_stringify(tokens, queue ++ [token], result)
-
-  defp keyword_stringify([], queue, result),
-    do: result ++ merge_string(queue)
-
-  defp keyword_stringify([{:string, _, _} = token | tokens], queue, result),
-    do: keyword_stringify(tokens, [], result ++ merge_string(queue ++ [token]))
-
-  defp keyword_stringify([token | tokens], queue, result),
-    do: keyword_stringify(tokens, [], result ++ merge_string(queue) ++ [token])
+  defp attributify([], _), do: []
 
   ##
   # Converts the content of an element into a string
@@ -351,9 +312,8 @@ defmodule Makeup.Lexers.HTMLLexer do
   @impl Makeup.Lexer
   def postprocess(tokens, _opts \\ []) do
     tokens
-    |> char_stringify()
-    |> keyword_stringify()
-    |> attributify()
+    |> merge()
+    |> attributify(false)
     |> element_stringify()
   end
 
