@@ -2,12 +2,150 @@ defmodule HTMLGenerators do
   @moduledoc false
   use ExUnitProperties
 
-  alias Makeup.Lexers.HTMLLexer.HTMLElements
-  alias Makeup.Lexers.HTMLLexer.HTMLAttributes
-  alias Helper
+  alias Makeup.Lexers.HTMLLexer.Combinators
 
-  @keywords HTMLElements.get_elements() ++
-              HTMLAttributes.get_attributes() ++ HTMLAttributes.get_event_handler_attributes()
+  @attributes Combinators.get_attributes() ++ Combinators.get_event_handler_attributes()
+
+  defp get_attributes do
+    @attributes
+  end
+
+  defp get_elements do
+    [
+      "a",
+      "abbr",
+      "address",
+      "area",
+      "article",
+      "aside",
+      "audio",
+      "b",
+      "base",
+      "bdi",
+      "bdo",
+      "blockquote",
+      "body",
+      "br",
+      "button",
+      "canvas",
+      "caption",
+      "cite",
+      "code",
+      "col",
+      "colgroup",
+      "data",
+      "datalist",
+      "dd",
+      "del",
+      "details",
+      "dfn",
+      "dialog",
+      "div",
+      "dl",
+      "dt",
+      "em",
+      "embed",
+      "fieldset",
+      "figcaption",
+      "figure",
+      "footer",
+      "form",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "head",
+      "header",
+      "hgroup",
+      "hr",
+      "html",
+      "i",
+      "iframe",
+      "img",
+      "input",
+      "ins",
+      "kbd",
+      "label",
+      "legend",
+      "li",
+      "link",
+      "main",
+      "map",
+      "mark",
+      "math",
+      "menu",
+      "meta",
+      "meter",
+      "nav",
+      "noscript",
+      "object",
+      "ol",
+      "optgroup",
+      "option",
+      "output",
+      "p",
+      "param",
+      "picture",
+      "pre",
+      "progress",
+      "q",
+      "rp",
+      "rt",
+      "ruby",
+      "s",
+      "samp",
+      "script",
+      "section",
+      "select",
+      "slot",
+      "small",
+      "source",
+      "span",
+      "strong",
+      "style",
+      "sub",
+      "summary",
+      "sup",
+      "svg",
+      "table",
+      "tbody",
+      "td",
+      "template",
+      "textarea",
+      "tfoot",
+      "th",
+      "thead",
+      "time",
+      "title",
+      "tr",
+      "track",
+      "u",
+      "ul",
+      "var",
+      "video",
+      "wbr"
+    ]
+  end
+
+  defp insensitive_case_string(string) do
+    string
+    |> String.split("", trim: true)
+    |> insensitive_case_string([])
+    |> Enum.join("")
+  end
+
+  defp insensitive_case_string([], result), do: result
+
+  defp insensitive_case_string([h | t], result) do
+    insensitive_case_string(t, result ++ [insensitive_fun(Enum.random(0..1), h)])
+  end
+
+  defp insensitive_fun(0, string), do: String.downcase(string)
+  defp insensitive_fun(1, string), do: String.upcase(string)
+
+  ## Generators
 
   def doctype_legacy_string do
     ExUnitProperties.gen all(
@@ -15,7 +153,7 @@ defmodule HTMLGenerators do
                            quotation <- StreamData.member_of(["\"", "\'"])
                          ) do
       String.duplicate(" ", one_or_more) <>
-        Helper.insensitive_case_string("SYSTEM") <>
+        insensitive_case_string("SYSTEM") <>
         String.duplicate(" ", one_or_more) <> quotation <> "about:legacy-compat" <> quotation
     end
   end
@@ -27,9 +165,9 @@ defmodule HTMLGenerators do
                            legacy_string <- doctype_legacy_string()
                          ) do
       "<!" <>
-        Helper.insensitive_case_string("DOCTYPE") <>
+        insensitive_case_string("DOCTYPE") <>
         String.duplicate(" ", one_or_more) <>
-        Helper.insensitive_case_string("html") <>
+        insensitive_case_string("html") <>
         legacy_string <>
         String.duplicate(" ", optional) <> ">"
     end
@@ -51,7 +189,7 @@ defmodule HTMLGenerators do
   end
 
   def void_element do
-    ExUnitProperties.gen all(element <- StreamData.member_of(HTMLElements.get_elements())) do
+    ExUnitProperties.gen all(element <- StreamData.member_of(get_elements())) do
       "<" <> element <> ">"
     end
   end
@@ -59,38 +197,22 @@ defmodule HTMLGenerators do
   def attribute do
     ExUnitProperties.gen all(
                            quotation <- StreamData.member_of(["\"", "\'", ""]),
-                           single_name <-
-                             StreamData.member_of(
-                               (HTMLAttributes.get_attributes() ++
-                                  HTMLAttributes.get_event_handler_attributes())
-                               |> MapSet.new()
-                               |> MapSet.difference(MapSet.new(HTMLElements.get_elements()))
-                               |> MapSet.to_list()
-                             ),
-                           name <-
-                             StreamData.member_of(
-                               HTMLAttributes.get_attributes() ++
-                                 HTMLAttributes.get_event_handler_attributes()
-                             ),
+                           name <- StreamData.member_of(get_attributes()),
                            value <- StreamData.string(:alphanumeric),
-                           !Enum.any?(@keywords, &(&1 == value))
+                           value not in get_attributes()
                          ) do
       if String.length(value) != 0,
         do: name <> "=" <> quotation <> value <> quotation,
-        else: single_name
+        else: name
     end
   end
 
   def element_attribute do
     ExUnitProperties.gen all(
                            quotation <- StreamData.member_of(["\"", "\'", ""]),
-                           name <-
-                             StreamData.member_of(
-                               HTMLAttributes.get_attributes() ++
-                                 HTMLAttributes.get_event_handler_attributes()
-                             ),
+                           name <- StreamData.member_of(get_attributes()),
                            value <- StreamData.string(:alphanumeric),
-                           !Enum.any?(@keywords, &(&1 == value))
+                           value not in get_attributes()
                          ) do
       if String.length(value) != 0,
         do: name <> "=" <> quotation <> value <> quotation,
@@ -100,7 +222,7 @@ defmodule HTMLGenerators do
 
   def single_element do
     ExUnitProperties.gen all(
-                           element_name <- StreamData.member_of(HTMLElements.get_elements()),
+                           element_name <- StreamData.member_of(get_elements()),
                            content <- StreamData.string(:ascii),
                            attributes <- StreamData.list_of(element_attribute(), max_length: 3),
                            attributes_string <-
@@ -126,7 +248,7 @@ defmodule HTMLGenerators do
 
   def nested_element do
     ExUnitProperties.gen all(
-                           element_name <- StreamData.member_of(HTMLElements.get_elements()),
+                           element_name <- StreamData.member_of(get_elements()),
                            content <- StreamData.one_of([void_element(), single_element()]),
                            attributes <- StreamData.list_of(element_attribute(), max_length: 3)
                          ) do
@@ -169,6 +291,7 @@ defmodule HTMLGenerators do
   ###################################################################
   # Incorrect
   ###################################################################
+
   def incorrect_doctype do
     ExUnitProperties.gen all(doctype <- doctype()) do
       doctype
@@ -176,29 +299,10 @@ defmodule HTMLGenerators do
     end
   end
 
-  def incorrect_comment do
-    ExUnitProperties.gen all(
-                           text <- StreamData.string(:ascii),
-                           start_text <- StreamData.member_of([">", "->", ""]),
-                           contain_text <- StreamData.member_of(["<!--", "-->", "--!>", ""]),
-                           end_text <- StreamData.member_of(["<!-", ""]),
-                           !Enum.all?([start_text, contain_text, end_text], &(&1 == ""))
-                         ) do
-      "<!--" <> start_text <> text <> contain_text <> end_text <> "-->"
-    end
-  end
-
   def incorrect_void_element do
     ExUnitProperties.gen all(void_element <- void_element()) do
       void_element
       |> String.replace_suffix(">", "")
-    end
-  end
-
-  def incorrect_attribute do
-    ExUnitProperties.gen all(attribute <- element_attribute()) do
-      attribute
-      |> String.slice(0..0)
     end
   end
 

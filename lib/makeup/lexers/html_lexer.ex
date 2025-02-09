@@ -9,18 +9,10 @@ defmodule Makeup.Lexers.HTMLLexer do
   import Makeup.Lexer.Combinators
   import Makeup.Lexer.Groups
   import Makeup.Lexers.HTMLLexer.Combinators
-  alias Makeup.Lexers.HTMLLexer.HTMLElements
-  alias Makeup.Lexers.HTMLLexer.HTMLAttributes
 
-  @keywords (HTMLElements.get_elements() ++
-               HTMLAttributes.get_attributes() ++ HTMLAttributes.get_event_handler_attributes())
-            |> Enum.sort_by(&String.length/1)
-            |> Enum.reverse()
-
-  @attributes (HTMLAttributes.get_attributes() ++ HTMLAttributes.get_event_handler_attributes())
-              |> MapSet.new()
-              |> MapSet.difference(MapSet.new(HTMLElements.get_elements()))
-              |> MapSet.to_list()
+  @attributes (get_attributes() ++ get_event_handler_attributes())
+              |> Enum.sort_by(&String.length/1)
+              |> Enum.reverse()
 
   ###################################################################
   # Step #1: tokenize the input (into a list of tokens)
@@ -64,13 +56,27 @@ defmodule Makeup.Lexers.HTMLLexer do
     |> token(:operator)
 
   # Combinators that highlight expressions surrounded by a pair of delimiters.
-  comment_tag = many_surrounded_by(parsec(:root_element), "<!--", "-->", eos: false)
+  comment_tag =
+    string("<!--")
+    |> concat(
+      repeat(
+        lookahead_not(string("-->"))
+        |> utf8_string([], 1)
+      )
+    )
+    |> string("-->")
+    |> token(:comment)
+
+  name_tag =
+    ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_, ?-, ?:, ?.], min: 1)
+    |> token(:name_tag)
 
   # Single punctuation symbols
   open_tag =
     "<"
     |> string()
     |> token(:punctuation)
+    |> concat(name_tag)
 
   close_tag =
     ">"
@@ -86,13 +92,10 @@ defmodule Makeup.Lexers.HTMLLexer do
     "</"
     |> string()
     |> token(:punctuation)
+    |> concat(name_tag)
 
-  # Keywords
-  keywords =
-    Enum.map(
-      @keywords,
-      &keyword/1
-    )
+  # Currently we match attributes anywhere in the text
+  attributes = Enum.map(@attributes, &keyword/1)
 
   # Unmatched
   insensitive_char = utf8_char([]) |> token(:char)
@@ -120,7 +123,7 @@ defmodule Makeup.Lexers.HTMLLexer do
         # Whitespaces
         whitespace
       ] ++
-        keywords ++
+        attributes ++
         [
           # Unmatched
           insensitive_char
@@ -200,13 +203,13 @@ defmodule Makeup.Lexers.HTMLLexer do
          ],
          _flag,
          result
-       ),
-       do:
-         attributify(
-           tokens,
-           false,
-           result ++ [{:name_attribute, attr, value}, operator, {:punctuation, attr2, value2}]
-         )
+       ) do
+    attributify(
+      tokens,
+      false,
+      result ++ [{:name_attribute, attr, value}, operator, {:punctuation, attr2, value2}]
+    )
+  end
 
   defp attributify(
          [
@@ -216,30 +219,25 @@ defmodule Makeup.Lexers.HTMLLexer do
          ],
          flag,
          result
-       ),
-       do:
-         attributify(
-           tokens,
-           flag,
-           result ++ [{:name_attribute, attr, value}, operator, {:string, attr2, value2}]
-         )
+       ) do
+    attributify(
+      tokens,
+      flag,
+      result ++ [{:name_attribute, attr, value}, operator, {:string, attr2, value2}]
+    )
+  end
 
   defp attributify(
          [
            {:punctuation, _, "<"} = punctuation,
-           {:keyword, _, _} = keyword,
+           {:name_tag, _, _} = name_tag,
            {:whitespace, _, _} = whitespace | tokens
          ],
          _,
          result
-       ),
-       do:
-         attributify(
-           tokens,
-           true,
-           result ++
-             [punctuation, keyword, whitespace]
-         )
+       ) do
+    attributify(tokens, true, result ++ [punctuation, name_tag, whitespace])
+  end
 
   defp attributify([{:punctuation, _, ">"} = punctuation | tokens], true, result),
     do: attributify(tokens, false, result ++ [punctuation])
@@ -256,12 +254,7 @@ defmodule Makeup.Lexers.HTMLLexer do
         do: {:name_attribute, attr, value},
         else: {:keyword, attr, value}
 
-    attributify(
-      tokens,
-      flag,
-      result ++
-        [attribute]
-    )
+    attributify(tokens, flag, result ++ [attribute])
   end
 
   defp attributify([token | tokens], flag, result),
@@ -314,49 +307,6 @@ defmodule Makeup.Lexers.HTMLLexer do
   defp keyword_stringify([token | tokens], queue, result),
     do: keyword_stringify(tokens, [], result ++ merge_string(queue) ++ [token])
 
-  ###
-  # Converts traces of the form "<!--"[token]*"-->" into a comment
-  ###
-  defp commentify(tokens), do: tokens |> commentify({nil, []}, [])
-
-  defp commentify([{:punctuation, group, "<!--"} = token | tokens], {nil, []}, result),
-    do: commentify(tokens, {group, [token]}, result)
-
-  defp commentify([{:punctuation, group, "-->"} = token | tokens], {group, queue}, result) do
-    [{_type, _attr, string}] = merge_string(queue ++ [token])
-
-    comment_content =
-      string
-      |> List.to_string()
-      |> String.replace_prefix("<!--", "")
-      |> String.replace_suffix("-->", "")
-
-    if String.starts_with?(comment_content, [">", "->"]) or
-         String.contains?(comment_content, ["<!--", "-->", "--!>"]) or
-         String.ends_with?(comment_content, "<!-"),
-       do:
-         commentify(
-           tokens,
-           {nil, []},
-           result ++ [{:string, %{language: :html}, string}]
-         ),
-       else:
-         commentify(
-           tokens,
-           {nil, []},
-           result ++ [{:comment, %{language: :html}, string}]
-         )
-  end
-
-  defp commentify([], {_group, queue}, result),
-    do: result ++ merge_string(queue)
-
-  defp commentify([token | tokens], {nil, _}, result),
-    do: commentify(tokens, {nil, []}, result ++ [token])
-
-  defp commentify([token | tokens], {group, queue}, result),
-    do: commentify(tokens, {group, queue ++ [token]}, result)
-
   ##
   # Converts the content of an element into a string
   ##
@@ -408,7 +358,6 @@ defmodule Makeup.Lexers.HTMLLexer do
   def postprocess(tokens, _opts \\ []) do
     tokens
     |> char_stringify()
-    |> commentify()
     |> keyword_stringify()
     |> attributify()
     |> element_stringify()
@@ -419,10 +368,6 @@ defmodule Makeup.Lexers.HTMLLexer do
   #######################################################################
   @impl Makeup.Lexer
   defgroupmatcher(:match_groups,
-    comment_tag: [
-      open: [[{:punctuation, _, "<!--"}]],
-      close: [[{:punctuation, _, "-->"}]]
-    ],
     start_closing_tag: [
       open: [[{:punctuation, _, "</"}]],
       close: [[{:punctuation, _, ">"}]]
