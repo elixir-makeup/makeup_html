@@ -10,93 +10,132 @@ defmodule Makeup.Lexers.HTMLLexer do
   import Makeup.Lexer.Groups
   import Makeup.Lexers.HTMLLexer.Combinators
 
-  @attributes MapSet.new(get_attributes() ++ get_event_handler_attributes())
-
   ###################################################################
   # Step #1: tokenize the input (into a list of tokens)
   ###################################################################
 
   # Whitespaces
-  wspace = ascii_string([?\r, ?\s, ?\n, ?\f], min: 1)
+  wspace = ascii_string([?\r, ?\s, ?\n, ?\t, ?\f], min: 1)
+  whitespace = token(wspace, :whitespace)
 
-  whitespace =
-    wspace
-    |> token(:whitespace)
+  # Comment
+  comment =
+    string("<!--")
+    |> repeat(lookahead_not(string("-->")) |> utf8_string([], 1))
+    |> optional(string("-->"))
+    |> token(:comment_multiline)
 
-  # Doctype
-  legacy_doctype_string =
-    wspace
-    |> optional()
-    |> concat(anycase_string("SYSTEM"))
-    |> optional(wspace)
-    |> concat(
-      choice([
-        string("\"about:legacy-compat\""),
-        string("'about:legacy-compat'")
-      ])
-    )
-
-  doctype =
-    "<!"
-    |> string()
-    |> concat(anycase_string("DOCTYPE"))
-    |> optional(wspace)
-    |> concat(anycase_string("html"))
-    |> optional(legacy_doctype_string)
-    |> optional(wspace)
-    |> concat(string(">"))
+  # CDATA section
+  cdata =
+    string("<![CDATA[")
+    |> repeat(lookahead_not(string("]]>")) |> utf8_string([], 1))
+    |> optional(string("]]>"))
     |> token(:comment_preproc)
 
-  # Operators
-  operators =
-    "="
-    |> string()
-    |> token(:operator)
+  # Processing instruction
+  processing_instruction =
+    string("<?")
+    |> repeat(utf8_string([not: ?>], 1))
+    |> optional(string(">"))
+    |> token(:comment_preproc)
 
-  # Combinators that highlight expressions surrounded by a pair of delimiters.
-  comment_tag =
-    string("<!--")
-    |> concat(
-      repeat(
-        lookahead_not(string("-->"))
-        |> utf8_string([], 1)
+  # Character reference
+  entity =
+    string("&")
+    |> concat(ascii_string([?a..?z, ?A..?Z, ?0..?9, ?#], min: 1))
+    |> concat(string(";"))
+    |> token(:name_entity)
+
+  # Doctype
+  doctype =
+    string("<!")
+    |> concat(anycase_string("DOCTYPE"))
+    |> repeat(utf8_string([not: ?>], 1))
+    |> optional(string(">"))
+    |> token(:comment_preproc)
+
+  # `.input` and `:let` for the HEEx lexer
+  tag_name_chars = [?a..?z, ?A..?Z, ?0..?9, ?_, ?-, ?:, ?.]
+  tag_name = ascii_string(tag_name_chars, min: 1)
+
+  attribute_name =
+    utf8_string([not: ?\s, not: ?\n, not: ?\r, not: ?\t, not: ?\f, not: ?/, not: ?>, not: ?=],
+      min: 1
+    )
+
+  quoted_attribute_value =
+    choice([
+      string("\"") |> repeat(utf8_string([not: ?"], 1)) |> optional(string("\"")),
+      string("'") |> repeat(utf8_string([not: ?'], 1)) |> optional(string("'"))
+    ])
+    |> token(:string)
+
+  unquoted_attribute_value =
+    utf8_string([not: ?\s, not: ?\n, not: ?\r, not: ?\t, not: ?\f, not: ?>], min: 1)
+    |> token(:string)
+
+  # A space may precede a quoted value, not an unquoted one: `field= name="x"`
+  attribute =
+    token(attribute_name, :name_attribute)
+    |> optional(
+      optional(whitespace)
+      |> concat(token(string("="), :operator))
+      |> optional(
+        choice([
+          optional(whitespace) |> concat(quoted_attribute_value),
+          unquoted_attribute_value
+        ])
       )
     )
-    |> string("-->")
-    |> token(:comment)
 
-  name_tag =
-    ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_, ?-, ?:, ?.], min: 1)
-    |> token(:name_tag)
+  # A solidus that does not close the tag, as in `<h/a='b'>`
+  stray_solidus = lookahead_not(string("/>")) |> concat(token(string("/"), :punctuation))
 
-  # Single punctuation symbols
-  open_tag =
-    "<"
-    |> string()
-    |> token(:punctuation)
-    |> concat(name_tag)
+  tag_attributes = repeat(choice([whitespace, attribute, stray_solidus]))
 
+  # End tag
   close_tag =
-    ">"
-    |> string()
-    |> token(:punctuation)
+    token(string("</"), :punctuation)
+    |> concat(token(tag_name, :name_tag))
+    |> optional(whitespace)
+    |> concat(token(string(">"), :punctuation))
 
-  close_self_tag =
-    "/>"
-    |> string()
-    |> token(:punctuation)
+  # Start tag
+  open_tag =
+    token(string("<"), :punctuation)
+    |> concat(token(tag_name, :name_tag))
+    |> concat(tag_attributes)
+    |> concat(token(choice([string("/>"), string(">")]), :punctuation))
 
-  open_closing_tag =
-    "</"
-    |> string()
-    |> token(:punctuation)
-    |> concat(name_tag)
+  # `<` and `>` are ordinary operators in JavaScript and CSS, so a script or
+  # style body is one opaque token that ends only at its own close tag
+  raw_element = fn name ->
+    open =
+      token(string("<"), :punctuation)
+      |> concat(token(anycase_string(name), :name_tag))
+      |> lookahead_not(ascii_char(tag_name_chars))
+      |> concat(tag_attributes)
+      |> concat(token(string(">"), :punctuation))
 
-  # Currently we match attributes anywhere in the text
-  attributes = utf8_string([?a..?z, ?A..?Z, ?0..?9, ?_, ?-, ?:, ?.], min: 1) |> token(:keyword)
+    close =
+      token(string("</"), :punctuation)
+      |> concat(token(anycase_string(name), :name_tag))
+      |> optional(whitespace)
+      |> concat(token(string(">"), :punctuation))
+
+    body =
+      times(lookahead_not(close) |> utf8_string([], 1), min: 1)
+      |> reduce({Enum, :join, [""]})
+      |> token(:text)
+
+    open |> optional(body) |> optional(close)
+  end
+
+  # Text
+  text = utf8_string([not: ?<, not: ?&], min: 1) |> token(:text)
 
   # Unmatched
-  insensitive_char = utf8_char([]) |> token(:char)
+  any_char = utf8_char([]) |> token(:text)
 
   # Tag the tokens with the language name.
   # This makes it easier to postprocess files with multiple languages.
@@ -105,22 +144,23 @@ defmodule Makeup.Lexers.HTMLLexer do
     {ttype, Map.put(meta, :language, :html), value}
   end
 
+  # First match wins, not longest, so: longest prefix first
   root_element_combinator =
     choice([
-      # Doctype
+      # Markup declarations
+      comment,
+      cdata,
       doctype,
-      # Operators
-      operators,
-      # Delimiters
-      comment_tag,
-      open_closing_tag,
-      open_tag,
-      close_self_tag,
+      processing_instruction,
+      # Tags
+      raw_element.("script"),
+      raw_element.("style"),
       close_tag,
+      open_tag,
       # Text
-      whitespace,
-      attributes,
-      insensitive_char
+      entity,
+      text,
+      any_char
     ])
 
   ##############################################################################
@@ -134,149 +174,24 @@ defmodule Makeup.Lexers.HTMLLexer do
   defparsec(
     :root_element,
     root_element_combinator |> map({__MODULE__, :__as_html_language__, []}),
-    inline: @inline
+    inline: @inline,
+    export_combinator: true
   )
 
   # @impl Makeup.Lexer
   defparsec(
     :root,
     repeat(parsec(:root_element)),
-    inline: @inline
+    inline: @inline,
+    export_combinator: true
   )
 
   ###################################################################
   # Step #2: postprocess the list of tokens
   ###################################################################
 
-  # Converts traces of the form [char]+ into a single string
-  # Converts keywords before and after strings into a single string
-
-  defp merge([{:char, attr, value} | tokens]),
-    do: merge([{:string, attr, <<value::utf8>>} | tokens])
-
-  defp merge([{tag, attr, value1}, {:char, _attr, value2} | tokens])
-       when tag in [:keyword, :string],
-       do: merge([{:string, attr, <<value1::binary, value2::utf8>>} | tokens])
-
-  defp merge([{tag, attr, value1}, {:keyword, _attr, value2} | tokens])
-       when tag in [:keyword, :string],
-       do: merge([{:string, attr, value1 <> value2} | tokens])
-
-  defp merge([{tag, attr, value1}, {:string, _attr, value2} | tokens])
-       when tag in [:keyword, :string],
-       do: merge([{:string, attr, value1 <> value2} | tokens])
-
-  defp merge([token | tokens]),
-    do: [token | merge(tokens)]
-
-  defp merge([]), do: []
-
-  # Converts the proper keywords into attributes
-
-  defp attributify(
-         [
-           {:punctuation, _, "<"} = punctuation,
-           {:name_tag, _, _} = name_tag,
-           {:whitespace, _, _} = whitespace | tokens
-         ],
-         _
-       ) do
-    [punctuation, name_tag, whitespace | attributify(tokens, true)]
-  end
-
-  defp attributify([{:punctuation, _, ">"} = punctuation | tokens], _flag),
-    do: [punctuation | attributify(tokens, false)]
-
-  defp attributify([{:punctuation, _, "/>"} = punctuation | tokens], _flag),
-    do: [punctuation | attributify(tokens, false)]
-
-  # when using the HTMLLexer from HEEx, we often have to deal with
-  # strings like <div class=>...</div> where an attribute starts, but is missing
-  # a value. We special case this "missing attribute value" case here to avoid
-  # formatting the closing tag as an attribute.
-  defp attributify(
-         [
-           {:keyword, attr, value},
-           {:operator, _, _} = operator,
-           {:punctuation, attr2, value2} | tokens
-         ],
-         true
-       ) do
-    [
-      {:name_attribute, attr, value},
-      operator,
-      {:punctuation, attr2, value2}
-      | attributify(tokens, false)
-    ]
-  end
-
-  defp attributify(
-         [
-           {:keyword, attr, value},
-           {:operator, _, _} = operator,
-           {_, attr2, value2} | tokens
-         ],
-         true
-       ) do
-    [
-      {:name_attribute, attr, value},
-      operator,
-      {:string, attr2, value2}
-      | attributify(tokens, true)
-    ]
-  end
-
-  defp attributify([{:keyword, attr, value} | tokens], true),
-    do: [{:name_attribute, attr, value} | attributify(tokens, true)]
-
-  defp attributify([{:keyword, attr, value} | tokens], flag) do
-    attribute =
-      if Enum.member?(@attributes, value),
-        do: {:name_attribute, attr, value},
-        else: {:string, attr, value}
-
-    [attribute | attributify(tokens, flag)]
-  end
-
-  defp attributify([token | tokens], flag),
-    do: [token | attributify(tokens, flag)]
-
-  defp attributify([], _), do: []
-
-  # Converts the content of an element into a string
-
-  defp buffer_to_acc("", acc), do: acc
-  defp buffer_to_acc(string, acc), do: [{:string, %{language: :html}, string} | acc]
-
-  defp stringify([{:punctuation, _, ">"} = punctuation | tokens], _, buffer),
-    do: buffer_to_acc(buffer, [punctuation | stringify(tokens, true, "")])
-
-  # We respect the comments
-  defp stringify([{:comment, _, _} = comment | tokens], _, buffer),
-    do: buffer_to_acc(buffer, [comment | stringify(tokens, true, "")])
-
-  defp stringify([{:punctuation, _, "</"} = punctuation | tokens], true, buffer),
-    do: buffer_to_acc(buffer, [punctuation | stringify(tokens, false, "")])
-
-  defp stringify([{:punctuation, _, "<"} = punctuation | tokens], true, buffer),
-    do: buffer_to_acc(buffer, [punctuation | stringify(tokens, false, "")])
-
-  defp stringify([token | tokens], false, buffer),
-    do: [token | stringify(tokens, false, buffer)]
-
-  defp stringify([{_, _, value} | tokens], true, buffer),
-    do: stringify(tokens, true, buffer <> value)
-
-  defp stringify([], _, buffer),
-    do: buffer_to_acc(buffer, [])
-
   @impl Makeup.Lexer
-  def postprocess(tokens, _opts \\ []) do
-    tokens
-    |> merge()
-    |> attributify(false)
-    |> stringify(false, "")
-  end
+  def postprocess(tokens, _opts \\ []), do: tokens
 
   #######################################################################
   # Step #3: highlight matching delimiters

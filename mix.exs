@@ -50,7 +50,6 @@ defmodule MakeupHTML.Mixfile do
   defp deps do
     [
       {:makeup, "~> 1.2"},
-      {:stream_data, "~> 1.0", only: :test},
       {:ex_doc, "~> 0.24", only: :dev, runtime: false}
     ]
   end
