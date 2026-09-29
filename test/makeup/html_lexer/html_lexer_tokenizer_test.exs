@@ -54,6 +54,42 @@ defmodule HTMLLexerTokenizer do
                {:comment_multiline, %{}, "<!--My favorite operators are > and <!-->"}
              ]
     end
+
+    test "an empty comment closes on >" do
+      assert lex("<!-->x") == [{:comment_multiline, %{}, "<!-->"}, {:text, %{}, "x"}]
+    end
+
+    test "an empty comment closes on ->" do
+      assert lex("<!--->x") == [{:comment_multiline, %{}, "<!--->"}, {:text, %{}, "x"}]
+    end
+
+    test "<!----> is a comment" do
+      assert lex("<!---->") == [{:comment_multiline, %{}, "<!---->"}]
+    end
+
+    test "--!> closes the comment" do
+      assert lex("<!-- x --!><p>y</p>") == [
+               {:comment_multiline, %{}, "<!-- x --!>"},
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "p"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:text, %{}, "y"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, "p"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+
+    test "--!> closes the comment before a later -->" do
+      assert lex("<!-- a --!> b -->") == [
+               {:comment_multiline, %{}, "<!-- a --!>"},
+               {:text, %{}, " b -->"}
+             ]
+    end
+
+    test "an unterminated comment runs to the end of the input" do
+      assert lex("<!-- x") == [{:comment_multiline, %{}, "<!-- x"}]
+    end
   end
 
   ###################################################################
@@ -230,6 +266,47 @@ defmodule HTMLLexerTokenizer do
                {:operator, %{}, "="},
                {:string, %{}, "\"be evil\""},
                {:punctuation, %{group_id: "group-1"}, ">"}
+             ]
+    end
+  end
+
+  ###################################################################
+  # Unterminated tag
+  ###################################################################
+  describe "unterminated tag" do
+    test "with only a name" do
+      assert lex("<div") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "div"}
+             ]
+    end
+
+    test "with an attribute and no value" do
+      assert lex("<div class=") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "div"},
+               {:whitespace, %{}, " "},
+               {:name_attribute, %{}, "class"},
+               {:operator, %{}, "="}
+             ]
+    end
+
+    test "with an unterminated quoted value" do
+      assert lex(~S|<div class="x|) == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "div"},
+               {:whitespace, %{}, " "},
+               {:name_attribute, %{}, "class"},
+               {:operator, %{}, "="},
+               {:string, %{}, ~S|"x|}
+             ]
+    end
+
+    test "with a trailing solidus" do
+      assert lex("<br/") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "br"},
+               {:punctuation, %{}, "/"}
              ]
     end
   end

@@ -14,45 +14,46 @@ defmodule Makeup.Lexers.HTMLLexer do
   # Step #1: tokenize the input (into a list of tokens)
   ###################################################################
 
-  # Whitespaces
-  wspace = ascii_string([?\r, ?\s, ?\n, ?\t, ?\f], min: 1)
-  whitespace = token(wspace, :whitespace)
+  whitespace =
+    ascii_string([?\r, ?\s, ?\n, ?\t, ?\f], min: 1)
+    |> token(:whitespace)
 
-  # Comment
+  comment_close = choice([string("-->"), string("--!>")])
+  empty_comment = choice([string(">"), string("->")])
+
   comment =
     string("<!--")
-    |> repeat(lookahead_not(string("-->")) |> utf8_string([], 1))
-    |> optional(string("-->"))
+    |> choice([
+      empty_comment,
+      repeat(lookahead_not(comment_close) |> utf8_string([], 1))
+      |> optional(comment_close)
+    ])
     |> token(:comment_multiline)
 
-  # CDATA section
   cdata =
     string("<![CDATA[")
     |> repeat(lookahead_not(string("]]>")) |> utf8_string([], 1))
     |> optional(string("]]>"))
     |> token(:comment_preproc)
 
-  # Processing instruction
-  processing_instruction =
-    string("<?")
-    |> repeat(utf8_string([not: ?>], 1))
-    |> optional(string(">"))
-    |> token(:comment_preproc)
-
-  # Character reference
-  entity =
-    string("&")
-    |> concat(ascii_string([?a..?z, ?A..?Z, ?0..?9, ?#], min: 1))
-    |> concat(string(";"))
-    |> token(:name_entity)
-
-  # Doctype
   doctype =
     string("<!")
     |> concat(anycase_string("DOCTYPE"))
     |> repeat(utf8_string([not: ?>], 1))
     |> optional(string(">"))
     |> token(:comment_preproc)
+
+  bogus_comment =
+    choice([string("<!"), string("<?")])
+    |> repeat(utf8_string([not: ?>], 1))
+    |> optional(string(">"))
+    |> token(:comment_preproc)
+
+  character_reference =
+    string("&")
+    |> concat(ascii_string([?a..?z, ?A..?Z, ?0..?9, ?#], min: 1))
+    |> concat(string(";"))
+    |> token(:name_entity)
 
   tag_name_chars = [?a..?z, ?A..?Z, ?0..?9, ?_, ?-, ?:, ?.]
   # A tag name cannot start with a digit. `.` and `:` are for HEEx function
@@ -96,19 +97,21 @@ defmodule Makeup.Lexers.HTMLLexer do
 
   tag_attributes = repeat(choice([whitespace, attribute, stray_solidus]))
 
-  # End tag
   close_tag =
     token(string("</"), :punctuation)
     |> concat(token(tag_name, :name_tag))
     |> optional(whitespace)
     |> concat(token(string(">"), :punctuation))
 
-  # Start tag
+  tag_close = token(choice([string("/>"), string(">")]), :punctuation)
+
+  # An attribute name may contain `<`. A tag with no `>` therefore scans to the
+  # end of the input. Without `eos` that scan fails and repeats from every `<`.
   open_tag =
     token(string("<"), :punctuation)
     |> concat(token(tag_name, :name_tag))
     |> concat(tag_attributes)
-    |> concat(token(choice([string("/>"), string(">")]), :punctuation))
+    |> concat(choice([tag_close, eos()]))
 
   # `<` and `>` are ordinary operators in JavaScript and CSS, so a script or
   # style body is one opaque token that ends only at its own close tag
@@ -134,10 +137,8 @@ defmodule Makeup.Lexers.HTMLLexer do
     open |> optional(body) |> optional(close)
   end
 
-  # Text
   text = utf8_string([not: ?<, not: ?&], min: 1) |> token(:text)
 
-  # Unmatched
   any_char = utf8_string([], 1) |> token(:text)
 
   # Tag the tokens with the language name.
@@ -147,21 +148,21 @@ defmodule Makeup.Lexers.HTMLLexer do
     {ttype, Map.put(meta, :language, :html), value}
   end
 
-  # First match wins, not longest, so: longest prefix first
+  # `choice` takes the first match, not the longest, so the order is significant.
   root_element_combinator =
     choice([
-      # Markup declarations
+      # Comments and declarations
       comment,
       cdata,
       doctype,
-      processing_instruction,
+      bogus_comment,
       # Tags
       raw_element.("script"),
       raw_element.("style"),
       close_tag,
       open_tag,
       # Text
-      entity,
+      character_reference,
       text,
       any_char
     ])
