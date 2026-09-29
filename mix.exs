@@ -5,7 +5,7 @@ defmodule MakeupHTML.Mixfile do
     [
       app: :makeup_html,
       version: "0.2.0",
-      elixir: "~> 1.10",
+      elixir: "~> 1.12",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -50,6 +50,7 @@ defmodule MakeupHTML.Mixfile do
   defp deps do
     [
       {:makeup, "~> 1.2"},
+      {:stream_data, "~> 1.0", only: :test},
       {:ex_doc, "~> 0.24", only: :dev, runtime: false}
     ]
   end

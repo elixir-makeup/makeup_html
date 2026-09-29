@@ -1,21 +1,58 @@
-name: Continuous Integration
+name: CI
 
-on: push
+on:
+  pull_request:
+  push:
+    branches:
+      - main
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      MIX_ENV: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pair:
+              elixir: "1.15"
+              otp: "24"
+          - pair:
+              elixir: "1.18"
+              otp: "27"
+          - pair:
+              elixir: "1.20"
+              otp: "29"
+            lint: lint
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Setup Elixir
-        uses: erlef/setup-beam@v1
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
         with:
-          otp-version: '24'
-          elixir-version: '1.12.1'
-      - name: Install dependencies
-        run: mix deps.get
-      - name: Run tests
-        run: mix test
-      - name: Check format
-        run: mix format --check-formatted
+          otp-version: ${{matrix.pair.otp}}
+          elixir-version: ${{matrix.pair.elixir}}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{matrix.pair.elixir}}-${{matrix.pair.otp}}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-
+
+      - run: mix deps.get
+
+      - run: mix format --check-formatted
+        if: ${{ matrix.lint }}
+
+      - run: mix deps.unlock --check-unused
+        if: ${{ matrix.lint }}
+
+      - run: mix deps.compile
+
+      - run: mix compile --warnings-as-errors
+        if: ${{ matrix.lint }}
+
+      - run: mix test
