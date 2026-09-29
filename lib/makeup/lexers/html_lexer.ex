@@ -54,9 +54,12 @@ defmodule Makeup.Lexers.HTMLLexer do
     |> optional(string(">"))
     |> token(:comment_preproc)
 
-  # `.input` and `:let` for the HEEx lexer
   tag_name_chars = [?a..?z, ?A..?Z, ?0..?9, ?_, ?-, ?:, ?.]
-  tag_name = ascii_string(tag_name_chars, min: 1)
+  # A tag name cannot start with a digit. `.` and `:` are for HEEx function
+  # components (`<.input>`) and slots (`<:inner_block>`).
+  tag_name =
+    lookahead(ascii_char([?a..?z, ?A..?Z, ?., ?:]))
+    |> concat(ascii_string(tag_name_chars, min: 1))
 
   attribute_name =
     utf8_string([not: ?\s, not: ?\n, not: ?\r, not: ?\t, not: ?\f, not: ?/, not: ?>, not: ?=],
@@ -135,7 +138,7 @@ defmodule Makeup.Lexers.HTMLLexer do
   text = utf8_string([not: ?<, not: ?&], min: 1) |> token(:text)
 
   # Unmatched
-  any_char = utf8_char([]) |> token(:text)
+  any_char = utf8_string([], 1) |> token(:text)
 
   # Tag the tokens with the language name.
   # This makes it easier to postprocess files with multiple languages.

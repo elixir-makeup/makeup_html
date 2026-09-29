@@ -120,6 +120,55 @@ defmodule HTMLLexerTokenizer do
   end
 
   ###################################################################
+  # Tag name
+  ###################################################################
+  describe "tag name" do
+    test "a digit does not start a tag" do
+      assert lex("<p>1<2</p>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "p"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:text, %{}, "1"},
+               {:text, %{}, "<"},
+               {:text, %{}, "2"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, "p"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+
+    test "a HEEx function component" do
+      assert lex("<.input />") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, ".input"},
+               {:whitespace, %{}, " "},
+               {:punctuation, %{group_id: "group-1"}, "/>"}
+             ]
+    end
+
+    test "a HEEx slot" do
+      assert lex("<:inner_block>x</:inner_block>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, ":inner_block"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:text, %{}, "x"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, ":inner_block"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+
+    test "a namespaced tag" do
+      assert lex("<svg:rect />") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "svg:rect"},
+               {:whitespace, %{}, " "},
+               {:punctuation, %{group_id: "group-1"}, "/>"}
+             ]
+    end
+  end
+
+  ###################################################################
   # Void element
   ###################################################################
   describe "void element" do
