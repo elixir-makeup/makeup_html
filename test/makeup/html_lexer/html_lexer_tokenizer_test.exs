@@ -1,5 +1,5 @@
 defmodule HTMLLexerTokenizer do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Makeup.Lexers.HTMLLexer
   alias Makeup.Lexer.Postprocess
@@ -271,6 +271,29 @@ defmodule HTMLLexerTokenizer do
   end
 
   ###################################################################
+  # End tag
+  ###################################################################
+  describe "end tag" do
+    test "with an attribute" do
+      assert lex("</p extra>") == [
+               {:punctuation, %{group_id: "group-1"}, "</"},
+               {:name_tag, %{}, "p"},
+               {:whitespace, %{}, " "},
+               {:name_attribute, %{}, "extra"},
+               {:punctuation, %{group_id: "group-1"}, ">"}
+             ]
+    end
+
+    test "with a trailing solidus" do
+      assert lex("</p/>") == [
+               {:punctuation, %{group_id: "group-1"}, "</"},
+               {:name_tag, %{}, "p"},
+               {:punctuation, %{}, "/>"}
+             ]
+    end
+  end
+
+  ###################################################################
   # Unterminated tag
   ###################################################################
   describe "unterminated tag" do
@@ -307,6 +330,13 @@ defmodule HTMLLexerTokenizer do
                {:punctuation, %{group_id: "group-1"}, "<"},
                {:name_tag, %{}, "br"},
                {:punctuation, %{}, "/"}
+             ]
+    end
+
+    test "an end tag with only a name" do
+      assert lex("</p") == [
+               {:punctuation, %{group_id: "group-1"}, "</"},
+               {:name_tag, %{}, "p"}
              ]
     end
   end
@@ -485,6 +515,32 @@ defmodule HTMLLexerTokenizer do
                {:text, %{}, "x"},
                {:punctuation, %{group_id: "group-2"}, "</"},
                {:name_tag, %{}, "SCRIPT"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+
+    test "the close tag may carry attributes" do
+      assert lex("<script>a</script foo>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "script"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:text, %{}, "a"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, "script"},
+               {:whitespace, %{}, " "},
+               {:name_attribute, %{}, "foo"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+
+    test "a longer name does not close the element" do
+      assert lex("<script>a</scriptx>b</script>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "script"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:text, %{}, "a</scriptx>b"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, "script"},
                {:punctuation, %{group_id: "group-2"}, ">"}
              ]
     end

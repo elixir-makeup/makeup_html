@@ -9,7 +9,7 @@ defmodule Makeup.Lexers.HTMLLexer.Application do
     Registry.register_lexer(HTMLLexer,
       options: [],
       names: ["html"],
-      extensions: ["html"]
+      extensions: ["html", "htm", "xhtml"]
     )
 
     Supervisor.start_link([], strategy: :one_for_one)

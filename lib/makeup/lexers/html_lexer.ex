@@ -25,27 +25,28 @@ defmodule Makeup.Lexers.HTMLLexer do
     string("<!--")
     |> choice([
       empty_comment,
-      repeat(lookahead_not(comment_close) |> utf8_string([], 1))
-      |> optional(comment_close)
+      chars_until(comment_close) |> optional(comment_close)
     ])
+    |> lexeme()
     |> token(:comment_multiline)
 
   cdata =
     string("<![CDATA[")
-    |> repeat(lookahead_not(string("]]>")) |> utf8_string([], 1))
+    |> concat(chars_until(string("]]>")))
     |> optional(string("]]>"))
+    |> lexeme()
     |> token(:comment_preproc)
 
   doctype =
     string("<!")
     |> concat(anycase_string("DOCTYPE"))
-    |> repeat(utf8_string([not: ?>], 1))
+    |> optional(utf8_string([not: ?>], min: 1))
     |> optional(string(">"))
     |> token(:comment_preproc)
 
   bogus_comment =
     choice([string("<!"), string("<?")])
-    |> repeat(utf8_string([not: ?>], 1))
+    |> optional(utf8_string([not: ?>], min: 1))
     |> optional(string(">"))
     |> token(:comment_preproc)
 
@@ -69,8 +70,8 @@ defmodule Makeup.Lexers.HTMLLexer do
 
   quoted_attribute_value =
     choice([
-      string("\"") |> repeat(utf8_string([not: ?"], 1)) |> optional(string("\"")),
-      string("'") |> repeat(utf8_string([not: ?'], 1)) |> optional(string("'"))
+      string("\"") |> optional(utf8_string([not: ?"], min: 1)) |> optional(string("\"")),
+      string("'") |> optional(utf8_string([not: ?'], min: 1)) |> optional(string("'"))
     ])
     |> token(:string)
 
@@ -97,41 +98,26 @@ defmodule Makeup.Lexers.HTMLLexer do
 
   tag_attributes = repeat(choice([whitespace, attribute, stray_solidus]))
 
-  close_tag =
-    token(string("</"), :punctuation)
-    |> concat(token(tag_name, :name_tag))
-    |> optional(whitespace)
-    |> concat(token(string(">"), :punctuation))
-
-  tag_close = token(choice([string("/>"), string(">")]), :punctuation)
-
   # An attribute name may contain `<`. A tag with no `>` therefore scans to the
   # end of the input. Without `eos` that scan fails and repeats from every `<`.
-  open_tag =
-    token(string("<"), :punctuation)
-    |> concat(token(tag_name, :name_tag))
-    |> concat(tag_attributes)
-    |> concat(choice([tag_close, eos()]))
+  tag_close = token(choice([string("/>"), string(">")]), :punctuation)
+
+  close_tag = tag("</", tag_name, tag_attributes, choice([tag_close, eos()]))
+  open_tag = tag("<", tag_name, tag_attributes, choice([tag_close, eos()]))
 
   # `<` and `>` are ordinary operators in JavaScript and CSS, so a script or
   # style body is one opaque token that ends only at its own close tag
   raw_element = fn name ->
-    open =
-      token(string("<"), :punctuation)
-      |> concat(token(anycase_string(name), :name_tag))
-      |> lookahead_not(ascii_char(tag_name_chars))
-      |> concat(tag_attributes)
-      |> concat(token(string(">"), :punctuation))
+    # `lookahead_not` keeps `</scriptx>` from closing the element with `x` as an attribute.
+    raw_name = anycase_string(name) |> lookahead_not(ascii_char(tag_name_chars))
+    bare_close = token(string(">"), :punctuation)
 
-    close =
-      token(string("</"), :punctuation)
-      |> concat(token(anycase_string(name), :name_tag))
-      |> optional(whitespace)
-      |> concat(token(string(">"), :punctuation))
+    open = tag("<", raw_name, tag_attributes, bare_close)
+    close = tag("</", raw_name, tag_attributes, bare_close)
 
     body =
-      times(lookahead_not(close) |> utf8_string([], 1), min: 1)
-      |> reduce({Enum, :join, [""]})
+      chars_until(close, min: 1)
+      |> lexeme()
       |> token(:text)
 
     open |> optional(body) |> optional(close)
@@ -144,6 +130,10 @@ defmodule Makeup.Lexers.HTMLLexer do
   # Tag the tokens with the language name.
   # This makes it easier to postprocess files with multiple languages.
   @doc false
+  def __as_html_language__({ttype, meta, value}) when map_size(meta) == 0 do
+    {ttype, %{language: :html}, value}
+  end
+
   def __as_html_language__({ttype, meta, value}) do
     {ttype, Map.put(meta, :language, :html), value}
   end

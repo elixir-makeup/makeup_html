@@ -3,16 +3,22 @@ defmodule HTMLGenerators do
   use ExUnitProperties
 
   def tag_name do
-    gen all(
-          first <- string([?a..?z], length: 1),
-          rest <- string([?a..?z, ?0..?9, ?-], max_length: 5)
-        ) do
-      first <> rest
-    end
+    one_of([
+      gen all(
+            first <- string([?a..?z, ?A..?Z, ?., ?:], length: 1),
+            rest <- string([?a..?z, ?A..?Z, ?0..?9, ?-, ?_, ?:, ?.], max_length: 5)
+          ) do
+        first <> rest
+      end,
+      member_of(["div", "DIV", "svg:rect", ".input", ":inner_block", "my-element", "_x"])
+    ])
   end
 
   def attribute_name do
-    string([?a..?z, ?A..?Z, ?0..?9, ?-, ?_, ?:, ?@, ?., ?#], min_length: 1, max_length: 8)
+    string([?a..?z, ?A..?Z, ?0..?9, ?-, ?_, ?:, ?@, ?., ?#, ?<, ?{, ?}],
+      min_length: 1,
+      max_length: 8
+    )
   end
 
   def attribute do
@@ -20,9 +26,13 @@ defmodule HTMLGenerators do
           name <- attribute_name(),
           quotation <- member_of(["\"", "'", ""]),
           value <- string(:alphanumeric, max_length: 6),
+          before_equals <- member_of(["", " "]),
+          after_equals <- member_of(["", " "]),
           valued? <- boolean()
         ) do
-      if valued?, do: name <> "=" <> quotation <> value <> quotation, else: name
+      if valued?,
+        do: name <> before_equals <> "=" <> after_equals <> quotation <> value <> quotation,
+        else: name
     end
   end
 
@@ -43,20 +53,33 @@ defmodule HTMLGenerators do
   end
 
   def end_tag do
-    gen all(name <- tag_name()) do
-      "</" <> name <> ">"
+    gen all(
+          name <- tag_name(),
+          extra <- member_of(["", " ", " extra", " a=b"])
+        ) do
+      "</" <> name <> extra <> ">"
     end
   end
 
   def comment do
-    gen all(body <- string([?a..?z, ?\s, ?<, ?>, ?!], max_length: 12)) do
-      "<!--" <> body <> "-->"
+    gen all(
+          body <- string([?a..?z, ?\s, ?<, ?>, ?!, ?-], max_length: 12),
+          closing <- member_of(["-->", "--!>"])
+        ) do
+      "<!--" <> body <> closing
     end
   end
 
+  def empty_comment do
+    member_of(["<!-->", "<!--->", "<!---->"])
+  end
+
   def cdata do
-    gen all(body <- string([?a..?z, ?\s, ?<, ?>], max_length: 12)) do
-      "<![CDATA[" <> body <> "]]>"
+    gen all(
+          opening <- member_of(["<![CDATA[", "<![cdata["]),
+          body <- string([?a..?z, ?\s, ?<, ?>, ?]], max_length: 12)
+        ) do
+      opening <> body <> "]]>"
     end
   end
 
@@ -69,13 +92,16 @@ defmodule HTMLGenerators do
     end
   end
 
-  def processing_instruction do
-    gen all(body <- string([?a..?z, ?\s, ?=, ?"], max_length: 10)) do
-      "<?" <> body <> ">"
+  def bogus_comment do
+    gen all(
+          opening <- member_of(["<!", "<?"]),
+          body <- string([?a..?z, ?\s, ?!, ?[, ?], ?", ?=], max_length: 10)
+        ) do
+      opening <> body <> ">"
     end
   end
 
-  def entity do
+  def character_reference do
     gen all(
           reference <-
             one_of([
@@ -89,17 +115,19 @@ defmodule HTMLGenerators do
 
   def raw_element do
     gen all(
-          name <- member_of(["script", "style"]),
-          body <- string([?a..?z, ?<, ?>, ?=, ?\s], max_length: 14)
+          name <- member_of(["script", "style", "SCRIPT", "Style"]),
+          attributes <- attributes(),
+          body <- string([?a..?z, ?<, ?>, ?=, ?/, ?!, ?\s], max_length: 14)
         ) do
-      "<" <> name <> ">" <> body <> "</" <> name <> ">"
+      "<" <> name <> attributes <> ">" <> body <> "</" <> name <> ">"
     end
   end
 
   def text do
-    string([?a..?z, ?A..?Z, ?0..?9, ?\s, ?\n, ?&, ?>, ?., ?é, ?€], max_length: 12)
+    string([?a..?z, ?A..?Z, ?0..?9, ?\s, ?\n, ?&, ?<, ?>, ?., ?-, ?!, ?é, ?€], max_length: 12)
   end
 
+  # Drops the last character, so `<!-- hi -->` becomes `<!-- hi --`.
   def truncated(generator) do
     map(generator, &String.slice(&1, 0, max(String.length(&1) - 1, 0)))
   end
@@ -109,15 +137,18 @@ defmodule HTMLGenerators do
       start_tag(),
       end_tag(),
       comment(),
+      empty_comment(),
       cdata(),
       doctype(),
-      processing_instruction(),
-      entity(),
+      bogus_comment(),
+      character_reference(),
       raw_element(),
       text(),
       truncated(start_tag()),
+      truncated(end_tag()),
       truncated(comment()),
       truncated(cdata()),
+      truncated(doctype()),
       truncated(raw_element())
     ])
   end
