@@ -42,18 +42,21 @@ defmodule Makeup.Lexers.HTMLLexer do
     |> concat(anycase_string("DOCTYPE"))
     |> optional(utf8_string([not: ?>], min: 1))
     |> optional(string(">"))
+    |> lexeme()
     |> token(:comment_preproc)
 
   bogus_comment =
     choice([string("<!"), string("<?")])
     |> optional(utf8_string([not: ?>], min: 1))
     |> optional(string(">"))
+    |> lexeme()
     |> token(:comment_preproc)
 
   character_reference =
     string("&")
     |> concat(ascii_string([?a..?z, ?A..?Z, ?0..?9, ?#], min: 1))
     |> concat(string(";"))
+    |> lexeme()
     |> token(:name_entity)
 
   tag_name_chars = [?a..?z, ?A..?Z, ?0..?9, ?_, ?-, ?:, ?.]
@@ -73,6 +76,7 @@ defmodule Makeup.Lexers.HTMLLexer do
       string("\"") |> optional(utf8_string([not: ?"], min: 1)) |> optional(string("\"")),
       string("'") |> optional(utf8_string([not: ?'], min: 1)) |> optional(string("'"))
     ])
+    |> lexeme()
     |> token(:string)
 
   unquoted_attribute_value =

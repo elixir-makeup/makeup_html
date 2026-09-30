@@ -12,10 +12,10 @@ defmodule HTMLLexerProperty do
     end
   end
 
-  property "every token value is iodata" do
+  property "every token value is a binary" do
     check all(source <- HTMLGenerators.document(), max_runs: 2_000) do
       for {_ttype, _meta, value} <- HTMLLexer.lex(source) do
-        assert is_binary(value) or is_list(value)
+        assert is_binary(value)
       end
     end
   end
