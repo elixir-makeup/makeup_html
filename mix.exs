@@ -49,7 +49,12 @@ defmodule MakeupHTML.Mixfile do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:makeup, "~> 1.2"},
+      # Pinned for the formatter fix in elixir-makeup/makeup#77.
+      # Back to `{:makeup, "~> 1.2"}` once it is released, hex rejects git deps.
+      {:makeup,
+       github: "elixir-makeup/makeup",
+       ref: "6773349d54f55fd8a408c53a50108c0f41bff271",
+       override: true},
       {:stream_data, "~> 1.0", only: :test},
       {:ex_doc, "~> 0.24", only: :dev, runtime: false}
     ]
