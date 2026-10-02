@@ -172,16 +172,14 @@ defmodule Makeup.Lexers.HTMLLexer do
   defparsec(
     :root_element,
     root_element_combinator |> map({__MODULE__, :__as_html_language__, []}),
-    inline: @inline,
-    export_combinator: true
+    inline: @inline
   )
 
   # @impl Makeup.Lexer
   defparsec(
     :root,
     repeat(parsec(:root_element)),
-    inline: @inline,
-    export_combinator: true
+    inline: @inline
   )
 
   ###################################################################
