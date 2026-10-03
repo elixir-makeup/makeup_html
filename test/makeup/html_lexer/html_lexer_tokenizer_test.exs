@@ -268,6 +268,18 @@ defmodule HTMLLexerTokenizer do
                {:punctuation, %{group_id: "group-1"}, ">"}
              ]
     end
+
+    test "<div class=\"flex gap-2 mt-4\">" do
+      assert lex("<div class=\"flex gap-2 mt-4\">") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "div"},
+               {:whitespace, %{}, " "},
+               {:name_attribute, %{}, "class"},
+               {:operator, %{}, "="},
+               {:string, %{}, "\"flex gap-2 mt-4\""},
+               {:punctuation, %{group_id: "group-1"}, ">"}
+             ]
+    end
   end
 
   ###################################################################
