@@ -4,7 +4,7 @@ defmodule MakeupHTML.Mixfile do
   def project do
     [
       app: :makeup_html,
-      version: "0.2.0",
+      version: "1.0.0",
       elixir: "~> 1.12",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -14,7 +14,7 @@ defmodule MakeupHTML.Mixfile do
       description: description(),
       docs: [
         main: "readme",
-        extras: ["README.md"]
+        extras: ["README.md", "CHANGELOG.md"]
       ]
     ]
   end
