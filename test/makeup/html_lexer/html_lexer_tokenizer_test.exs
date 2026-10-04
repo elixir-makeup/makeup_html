@@ -1,10 +1,8 @@
 defmodule HTMLLexerTokenizer do
-  use ExUnit.Case, async: false
-  use ExUnitProperties
+  use ExUnit.Case, async: true
 
   alias Makeup.Lexers.HTMLLexer
   alias Makeup.Lexer.Postprocess
-  alias Helper
 
   # This function has three purposes:
   # 1. Ensure deterministic lexer output (no random prefix)
@@ -19,45 +17,6 @@ defmodule HTMLLexerTokenizer do
     |> Enum.map(fn {ttype, meta, value} -> {ttype, Map.delete(meta, :language), value} end)
   end
 
-  defp tokenize_elements(element) do
-    [element_name | attributes] =
-      element
-      |> String.split(" ")
-
-    attributes_tokens =
-      attributes
-      |> Enum.flat_map(fn attr ->
-        [name | value] =
-          attr
-          |> String.split("=")
-
-        cond do
-          value != [] ->
-            [
-              {:whitespace, %{}, " "},
-              {:name_attribute, %{}, name},
-              {:operator, %{}, "="},
-              {:string, %{}, hd(value)}
-            ]
-
-          String.length(name) == 0 ->
-            [
-              {:whitespace, %{}, " "}
-            ]
-
-          true ->
-            [
-              {:whitespace, %{}, " "},
-              {:name_attribute, %{}, name}
-            ]
-        end
-      end)
-
-    if attributes_tokens == [],
-      do: {{:name_tag, %{}, element_name}, {:whitespace, %{}, " "}},
-      else: {{:name_tag, %{}, element_name}, attributes_tokens}
-  end
-
   ###################################################################
   # Empty string
   ###################################################################
@@ -69,18 +28,6 @@ defmodule HTMLLexerTokenizer do
   # Doctype
   ###################################################################
   describe "DOCTYPE" do
-    property "correct DOCTYPE is correctly tokenized" do
-      check all(doctype <- HTMLGenerators.doctype()) do
-        assert lex(doctype) == [{:comment_preproc, %{}, doctype}]
-      end
-    end
-
-    property "incorrect DOCTYPE is incorrectly tokenized" do
-      check all(doctype <- HTMLGenerators.incorrect_doctype()) do
-        refute lex(doctype) == [{:comment_preproc, %{}, doctype}]
-      end
-    end
-
     test "<!DOCTYPE html>" do
       doctype = "<!DOCTYPE html>"
 
@@ -100,16 +47,160 @@ defmodule HTMLLexerTokenizer do
   # Comment
   ###################################################################
   describe "comment" do
-    property "correct comment is correctly tokenized" do
-      check all(comment <- HTMLGenerators.comment()) do
-        assert lex(comment) == [{:comment, %{}, comment}]
-      end
-    end
-
     test "<!--My favorite operators are > and <!-->" do
       comment = "<!--My favorite operators are > and <!-->"
 
-      assert lex(comment) == [{:comment, %{}, "<!--My favorite operators are > and <!-->"}]
+      assert lex(comment) == [
+               {:comment_multiline, %{}, "<!--My favorite operators are > and <!-->"}
+             ]
+    end
+
+    test "an empty comment closes on >" do
+      assert lex("<!-->x") == [{:comment_multiline, %{}, "<!-->"}, {:text, %{}, "x"}]
+    end
+
+    test "an empty comment closes on ->" do
+      assert lex("<!--->x") == [{:comment_multiline, %{}, "<!--->"}, {:text, %{}, "x"}]
+    end
+
+    test "<!----> is a comment" do
+      assert lex("<!---->") == [{:comment_multiline, %{}, "<!---->"}]
+    end
+
+    test "--!> closes the comment" do
+      assert lex("<!-- x --!><p>y</p>") == [
+               {:comment_multiline, %{}, "<!-- x --!>"},
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "p"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:text, %{}, "y"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, "p"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+
+    test "--!> closes the comment before a later -->" do
+      assert lex("<!-- a --!> b -->") == [
+               {:comment_multiline, %{}, "<!-- a --!>"},
+               {:text, %{}, " b -->"}
+             ]
+    end
+
+    test "an unterminated comment runs to the end of the input" do
+      assert lex("<!-- x") == [{:comment_multiline, %{}, "<!-- x"}]
+    end
+  end
+
+  ###################################################################
+  # Character reference
+  ###################################################################
+  describe "character reference" do
+    test "named" do
+      assert lex("Tom &amp; Jerry") == [
+               {:text, %{}, "Tom "},
+               {:name_entity, %{}, "&amp;"},
+               {:text, %{}, " Jerry"}
+             ]
+    end
+
+    test "decimal" do
+      assert lex("&#169;") == [{:name_entity, %{}, "&#169;"}]
+    end
+
+    test "hexadecimal" do
+      assert lex("&#xA9;") == [{:name_entity, %{}, "&#xA9;"}]
+    end
+
+    test "an ampersand with no semicolon is text" do
+      assert lex("a & b") == [{:text, %{}, "a "}, {:text, %{}, "&"}, {:text, %{}, " b"}]
+    end
+  end
+
+  ###################################################################
+  # CDATA section
+  ###################################################################
+  describe "CDATA section" do
+    test "<![CDATA[x<y]]>" do
+      cdata = "<![CDATA[x<y]]>"
+
+      assert lex(cdata) == [{:comment_preproc, %{}, cdata}]
+    end
+
+    test "inside a MathML element" do
+      assert lex("<ms><![CDATA[x<y]]></ms>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "ms"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:comment_preproc, %{}, "<![CDATA[x<y]]>"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, "ms"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+  end
+
+  ###################################################################
+  # Processing instruction
+  ###################################################################
+  describe "processing instruction" do
+    test "with a target only" do
+      assert lex("<?target>") == [{:comment_preproc, %{}, "<?target>"}]
+    end
+
+    test "with data" do
+      instruction = ~S|<?xml version="1.0"?>|
+
+      assert lex(instruction) == [{:comment_preproc, %{}, instruction}]
+    end
+  end
+
+  ###################################################################
+  # Tag name
+  ###################################################################
+  describe "tag name" do
+    test "a digit does not start a tag" do
+      assert lex("<p>1<2</p>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "p"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:text, %{}, "1"},
+               {:text, %{}, "<"},
+               {:text, %{}, "2"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, "p"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+
+    test "a HEEx function component" do
+      assert lex("<.input />") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, ".input"},
+               {:whitespace, %{}, " "},
+               {:punctuation, %{group_id: "group-1"}, "/>"}
+             ]
+    end
+
+    test "a HEEx slot" do
+      assert lex("<:inner_block>x</:inner_block>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, ":inner_block"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:text, %{}, "x"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, ":inner_block"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+
+    test "a namespaced tag" do
+      assert lex("<svg:rect />") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "svg:rect"},
+               {:whitespace, %{}, " "},
+               {:punctuation, %{group_id: "group-1"}, "/>"}
+             ]
     end
   end
 
@@ -117,36 +208,6 @@ defmodule HTMLLexerTokenizer do
   # Void element
   ###################################################################
   describe "void element" do
-    property "correct void_element is correctly tokenized" do
-      check all(void_element <- HTMLGenerators.void_element()) do
-        element =
-          void_element
-          |> String.replace_prefix("<", "")
-          |> String.replace_suffix(">", "")
-
-        assert lex(void_element) == [
-                 {:punctuation, %{group_id: "group-1"}, "<"},
-                 {:name_tag, %{}, element},
-                 {:punctuation, %{group_id: "group-1"}, ">"}
-               ]
-      end
-    end
-
-    property "incorrect void_element is incorrectly tokenized" do
-      check all(void_element <- HTMLGenerators.incorrect_void_element()) do
-        element =
-          void_element
-          |> String.replace_prefix("<", "")
-          |> String.replace_suffix(">", "")
-
-        refute lex(void_element) == [
-                 {:punctuation, %{group_id: "group-1"}, "<"},
-                 {:name_tag, %{}, element},
-                 {:punctuation, %{group_id: "group-1"}, ">"}
-               ]
-      end
-    end
-
     test "<hr>" do
       void_element = "<hr>"
 
@@ -162,63 +223,132 @@ defmodule HTMLLexerTokenizer do
   # Attribute
   ###################################################################
   describe "attribute" do
-    property "correct attribute is correctly tokenized" do
-      check all(attribute <- HTMLGenerators.attribute()) do
-        [name | value] =
-          attribute
-          |> String.split("=")
-
-        if value != [] do
-          assert lex(attribute) == [
-                   {:name_attribute, %{}, name},
-                   {:operator, %{}, "="},
-                   {:string, %{}, value |> Enum.at(0)}
-                 ]
-        else
-          assert lex(attribute) == [
-                   {:name_attribute, %{}, name}
-                 ]
-        end
-      end
-    end
-
-    test "disabled" do
-      attribute = "disabled"
-
-      assert lex(attribute) == [
-               {:name_attribute, %{}, attribute}
+    test "<input disabled>" do
+      assert lex("<input disabled>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "input"},
+               {:whitespace, %{}, " "},
+               {:name_attribute, %{}, "disabled"},
+               {:punctuation, %{group_id: "group-1"}, ">"}
              ]
     end
 
-    test "value=yes" do
-      attribute = "value=yes"
-
-      assert lex(attribute) == [
+    test "<input value=yes>" do
+      assert lex("<input value=yes>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "input"},
+               {:whitespace, %{}, " "},
                {:name_attribute, %{}, "value"},
                {:operator, %{}, "="},
-               {:string, %{}, "yes"}
+               {:string, %{}, "yes"},
+               {:punctuation, %{group_id: "group-1"}, ">"}
              ]
     end
 
-    test "type='checkbox'" do
-      attribute = "type='checkbox'"
-
-      assert lex(attribute) == [
+    test "<input type='checkbox'>" do
+      assert lex("<input type='checkbox'>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "input"},
+               {:whitespace, %{}, " "},
                {:name_attribute, %{}, "type"},
                {:operator, %{}, "="},
-               {:string, %{}, "'checkbox'"}
+               {:string, %{}, "'checkbox'"},
+               {:punctuation, %{group_id: "group-1"}, ">"}
              ]
     end
 
-    test "name=\"be evil\"" do
-      attribute = "name=\"be evil\""
-
-      assert lex(attribute) == [
+    test "<input name=\"be evil\">" do
+      assert lex("<input name=\"be evil\">") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "input"},
+               {:whitespace, %{}, " "},
                {:name_attribute, %{}, "name"},
                {:operator, %{}, "="},
-               {:string, %{}, "\"be"},
+               {:string, %{}, "\"be evil\""},
+               {:punctuation, %{group_id: "group-1"}, ">"}
+             ]
+    end
+
+    test "<div class=\"flex gap-2 mt-4\">" do
+      assert lex("<div class=\"flex gap-2 mt-4\">") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "div"},
                {:whitespace, %{}, " "},
-               {:string, %{}, "evil\""}
+               {:name_attribute, %{}, "class"},
+               {:operator, %{}, "="},
+               {:string, %{}, "\"flex gap-2 mt-4\""},
+               {:punctuation, %{group_id: "group-1"}, ">"}
+             ]
+    end
+  end
+
+  ###################################################################
+  # End tag
+  ###################################################################
+  describe "end tag" do
+    test "with an attribute" do
+      assert lex("</p extra>") == [
+               {:punctuation, %{group_id: "group-1"}, "</"},
+               {:name_tag, %{}, "p"},
+               {:whitespace, %{}, " "},
+               {:name_attribute, %{}, "extra"},
+               {:punctuation, %{group_id: "group-1"}, ">"}
+             ]
+    end
+
+    test "with a trailing solidus" do
+      assert lex("</p/>") == [
+               {:punctuation, %{group_id: "group-1"}, "</"},
+               {:name_tag, %{}, "p"},
+               {:punctuation, %{}, "/>"}
+             ]
+    end
+  end
+
+  ###################################################################
+  # Unterminated tag
+  ###################################################################
+  describe "unterminated tag" do
+    test "with only a name" do
+      assert lex("<div") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "div"}
+             ]
+    end
+
+    test "with an attribute and no value" do
+      assert lex("<div class=") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "div"},
+               {:whitespace, %{}, " "},
+               {:name_attribute, %{}, "class"},
+               {:operator, %{}, "="}
+             ]
+    end
+
+    test "with an unterminated quoted value" do
+      assert lex(~S|<div class="x|) == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "div"},
+               {:whitespace, %{}, " "},
+               {:name_attribute, %{}, "class"},
+               {:operator, %{}, "="},
+               {:string, %{}, ~S|"x|}
+             ]
+    end
+
+    test "with a trailing solidus" do
+      assert lex("<br/") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "br"},
+               {:punctuation, %{}, "/"}
+             ]
+    end
+
+    test "an end tag with only a name" do
+      assert lex("</p") == [
+               {:punctuation, %{group_id: "group-1"}, "</"},
+               {:name_tag, %{}, "p"}
              ]
     end
   end
@@ -227,77 +357,6 @@ defmodule HTMLLexerTokenizer do
   # Single element
   ###################################################################
   describe "single element" do
-    property "correct single element is correctly tokenized" do
-      check all(single_element <- HTMLGenerators.single_element()) do
-        if String.ends_with?(single_element, "/>") do
-          element_opening =
-            single_element
-            |> String.replace_prefix("<", "")
-            |> String.replace_suffix("/>", "")
-
-          {element, attributes_tokens} = tokenize_elements(element_opening)
-
-          assert lex(single_element) ==
-                   [
-                     {:punctuation, %{group_id: "group-1"}, "<"},
-                     element
-                   ] ++
-                     attributes_tokens ++
-                     [
-                       {:punctuation, %{group_id: "group-1"}, "/>"}
-                     ]
-        else
-          [head | tail] =
-            single_element
-            |> String.split(">", trim: true)
-
-          element_opening =
-            head
-            |> String.replace_prefix("<", "")
-
-          {element, attributes_tokens} = tokenize_elements(element_opening)
-
-          if tail != [] do
-            [element_content | rest] =
-              tail
-              |> Enum.at(0)
-              |> String.split("</", trim: true)
-
-            content_tokens =
-              if rest != [],
-                do: [{:string, %{}, element_content}],
-                else: rest
-
-            assert lex(single_element) ==
-                     [
-                       {:punctuation, %{group_id: "group-1"}, "<"},
-                       element
-                     ] ++
-                       attributes_tokens ++
-                       [
-                         {:punctuation, %{group_id: "group-1"}, ">"}
-                       ] ++
-                       content_tokens ++
-                       [
-                         {:punctuation, %{group_id: "group-2"}, "</"},
-                         element,
-                         {:punctuation, %{group_id: "group-2"}, ">"}
-                       ]
-          else
-            assert lex(single_element) ==
-                     [
-                       {:punctuation, %{group_id: "group-1"}, "<"},
-                       element
-                     ] ++
-                       attributes_tokens ++
-                       [
-                         {:punctuation, %{group_id: "group-1"}, ">"}
-                       ]
-          end
-        end
-      end
-    end
-
     test "<input value=yes />" do
       element = "<input value=yes />"
 
@@ -320,7 +379,7 @@ defmodule HTMLLexerTokenizer do
                {:punctuation, %{group_id: "group-1"}, "<"},
                {:name_tag, %{}, "title"},
                {:punctuation, %{group_id: "group-1"}, ">"},
-               {:string, %{}, "Hello"},
+               {:text, %{}, "Hello"},
                {:punctuation, %{group_id: "group-2"}, "</"},
                {:name_tag, %{}, "title"},
                {:punctuation, %{group_id: "group-2"}, ">"}
@@ -378,7 +437,7 @@ defmodule HTMLLexerTokenizer do
                {:punctuation, %{group_id: "group-2"}, "<"},
                {:name_tag, %{}, "title"},
                {:punctuation, %{group_id: "group-2"}, ">"},
-               {:string, %{}, "Hello"},
+               {:text, %{}, "Hello"},
                {:punctuation, %{group_id: "group-3"}, "</"},
                {:name_tag, %{}, "title"},
                {:punctuation, %{group_id: "group-3"}, ">"},
@@ -401,6 +460,112 @@ defmodule HTMLLexerTokenizer do
                {:punctuation, %{group_id: "group-3"}, "</"},
                {:name_tag, %{}, "body"},
                {:punctuation, %{group_id: "group-3"}, ">"}
+             ]
+    end
+  end
+
+  ###################################################################
+  # Raw text element
+  ###################################################################
+  describe "raw text element" do
+    test "<style>ul > li { color: red }</style>" do
+      assert lex("<style>ul > li { color: red }</style>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "style"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:text, %{}, "ul > li { color: red }"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, "style"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+
+    test "comparison operators in a script are not tags" do
+      assert lex("<script>if (a<b && c>d) f()</script>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "script"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:text, %{}, "if (a<b && c>d) f()"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, "script"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+
+    test "an end tag inside a string is not a tag" do
+      assert lex(~S|<script>w("</p>")</script>|) == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "script"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:text, %{}, ~S|w("</p>")|},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, "script"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+
+    test "with attributes and no body" do
+      assert lex(~S|<script src="a.js"></script>|) == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "script"},
+               {:whitespace, %{}, " "},
+               {:name_attribute, %{}, "src"},
+               {:operator, %{}, "="},
+               {:string, %{}, ~S|"a.js"|},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, "script"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+
+    test "the close tag is matched case-insensitively" do
+      assert lex("<SCRIPT>x</SCRIPT>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "SCRIPT"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:text, %{}, "x"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, "SCRIPT"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+
+    test "the close tag may carry attributes" do
+      assert lex("<script>a</script foo>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "script"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:text, %{}, "a"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, "script"},
+               {:whitespace, %{}, " "},
+               {:name_attribute, %{}, "foo"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+
+    test "a longer name does not close the element" do
+      assert lex("<script>a</scriptx>b</script>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "script"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:text, %{}, "a</scriptx>b"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, "script"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
+             ]
+    end
+
+    test "a longer name that starts with script is an ordinary element" do
+      assert lex("<scripty>a</scripty>") == [
+               {:punctuation, %{group_id: "group-1"}, "<"},
+               {:name_tag, %{}, "scripty"},
+               {:punctuation, %{group_id: "group-1"}, ">"},
+               {:text, %{}, "a"},
+               {:punctuation, %{group_id: "group-2"}, "</"},
+               {:name_tag, %{}, "scripty"},
+               {:punctuation, %{group_id: "group-2"}, ">"}
              ]
     end
   end
@@ -429,49 +594,63 @@ defmodule HTMLLexerTokenizer do
 
       assert lex(document) == [
                {:comment_preproc, %{}, "<!DOCTYPE HTML>"},
-               {:whitespace, %{}, "\n  "},
+               {:text, %{}, "
+  "},
                {:punctuation, %{group_id: "group-1"}, "<"},
                {:name_tag, %{}, "html"},
                {:punctuation, %{group_id: "group-1"}, ">"},
-               {:string, %{}, "\n    "},
-               {:comment, %{}, "<!-- this is a comment -->"},
-               {:string, %{}, "\n    "},
+               {:text, %{}, "
+    "},
+               {:comment_multiline, %{}, "<!-- this is a comment -->"},
+               {:text, %{}, "
+    "},
                {:punctuation, %{group_id: "group-2"}, "<"},
                {:name_tag, %{}, "head"},
                {:punctuation, %{group_id: "group-2"}, ">"},
-               {:string, %{}, "\n      "},
+               {:text, %{}, "
+      "},
                {:punctuation, %{group_id: "group-3"}, "<"},
                {:name_tag, %{}, "title"},
                {:punctuation, %{group_id: "group-3"}, ">"},
-               {:string, %{}, "\n        Hello\n      "},
+               {:text, %{}, "
+        Hello
+      "},
                {:punctuation, %{group_id: "group-4"}, "</"},
                {:name_tag, %{}, "title"},
                {:punctuation, %{group_id: "group-4"}, ">"},
-               {:string, %{}, "\n    "},
+               {:text, %{}, "
+    "},
                {:punctuation, %{group_id: "group-5"}, "</"},
                {:name_tag, %{}, "head"},
                {:punctuation, %{group_id: "group-5"}, ">"},
-               {:string, %{}, "\n    "},
+               {:text, %{}, "
+    "},
                {:punctuation, %{group_id: "group-6"}, "<"},
                {:name_tag, %{}, "body"},
                {:punctuation, %{group_id: "group-6"}, ">"},
-               {:string, %{}, "\n      "},
+               {:text, %{}, "
+      "},
                {:punctuation, %{group_id: "group-7"}, "<"},
                {:name_tag, %{}, "p"},
                {:punctuation, %{group_id: "group-7"}, ">"},
-               {:string, %{}, "\n        Welcome to this example.\n      "},
+               {:text, %{}, "
+        Welcome to this example.
+      "},
                {:punctuation, %{group_id: "group-8"}, "</"},
                {:name_tag, %{}, "p"},
                {:punctuation, %{group_id: "group-8"}, ">"},
-               {:string, %{}, "\n    "},
+               {:text, %{}, "
+    "},
                {:punctuation, %{group_id: "group-9"}, "</"},
                {:name_tag, %{}, "body"},
                {:punctuation, %{group_id: "group-9"}, ">"},
-               {:string, %{}, "\n  "},
+               {:text, %{}, "
+  "},
                {:punctuation, %{group_id: "group-10"}, "</"},
                {:name_tag, %{}, "html"},
                {:punctuation, %{group_id: "group-10"}, ">"},
-               {:string, %{}, "\n"}
+               {:text, %{}, "
+"}
              ]
     end
   end
@@ -501,11 +680,12 @@ defmodule HTMLLexerTokenizer do
              {:whitespace, %{}, " "},
              {:name_attribute, %{}, ":let"},
              {:operator, %{}, "="},
-             {:string, %{}, " "},
+             {:whitespace, %{}, " "},
              {:name_attribute, %{}, "field"},
              {:operator, %{}, "="},
              {:punctuation, %{group_id: "group-1"}, ">"},
-             {:string, %{}, "\n  "},
+             {:text, %{}, "
+  "},
              {:punctuation, %{group_id: "group-2"}, "<"},
              {:name_tag, %{}, "input"},
              {:whitespace, %{}, " "},
@@ -519,9 +699,10 @@ defmodule HTMLLexerTokenizer do
              {:whitespace, %{}, " "},
              {:name_attribute, %{}, "value"},
              {:operator, %{}, "="},
-             {:string, %{}, " "},
+             {:whitespace, %{}, " "},
              {:punctuation, %{group_id: "group-2"}, "/>"},
-             {:whitespace, %{}, "\n  "},
+             {:text, %{}, "
+  "},
              {:punctuation, %{group_id: "group-3"}, "<"},
              {:name_tag, %{}, ".input"},
              {:whitespace, %{}, " "},
@@ -531,13 +712,14 @@ defmodule HTMLLexerTokenizer do
              {:whitespace, %{}, " "},
              {:name_attribute, %{}, "field"},
              {:operator, %{}, "="},
-             {:string, %{}, " "},
+             {:whitespace, %{}, " "},
              {:name_attribute, %{}, "placeholder"},
              {:operator, %{}, "="},
              {:string, %{}, "\"email\""},
              {:whitespace, %{}, " "},
              {:punctuation, %{group_id: "group-3"}, "/>"},
-             {:whitespace, %{}, "\n  "},
+             {:text, %{}, "
+  "},
              {:punctuation, %{group_id: "group-4"}, "<"},
              {:name_tag, %{}, ".input"},
              {:whitespace, %{}, " "},
@@ -547,17 +729,19 @@ defmodule HTMLLexerTokenizer do
              {:whitespace, %{}, " "},
              {:name_attribute, %{}, "field"},
              {:operator, %{}, "="},
-             {:string, %{}, " "},
+             {:whitespace, %{}, " "},
              {:name_attribute, %{}, "placeholder"},
              {:operator, %{}, "="},
              {:string, %{}, "\"name\""},
              {:whitespace, %{}, " "},
              {:punctuation, %{group_id: "group-4"}, "/>"},
-             {:whitespace, %{}, "\n  "},
+             {:text, %{}, "
+  "},
              {:punctuation, %{group_id: "group-5"}, "<"},
              {:name_tag, %{}, "label"},
              {:punctuation, %{group_id: "group-5"}, ">"},
-             {:string, %{}, "\n    "},
+             {:text, %{}, "
+    "},
              {:punctuation, %{group_id: "group-6"}, "<"},
              {:name_tag, %{}, "input"},
              {:whitespace, %{}, " "},
@@ -571,33 +755,35 @@ defmodule HTMLLexerTokenizer do
              {:whitespace, %{}, " "},
              {:name_attribute, %{}, "value"},
              {:operator, %{}, "="},
-             {:string, %{}, " "},
+             {:whitespace, %{}, " "},
              {:name_attribute, %{}, "class"},
              {:operator, %{}, "="},
              {:string, %{}, "\"hidden\""},
              {:whitespace, %{}, " "},
              {:punctuation, %{group_id: "group-6"}, "/>"},
-             {:whitespace, %{}, "\n    "},
-             {:string, %{}, "delete"},
-             {:whitespace, %{}, "\n  "},
+             {:text, %{}, "
+    delete
+  "},
              {:punctuation, %{group_id: "group-7"}, "</"},
              {:name_tag, %{}, "label"},
              {:punctuation, %{group_id: "group-7"}, ">"},
-             {:string, %{}, "\n"},
+             {:text, %{}, "
+"},
              {:punctuation, %{group_id: "group-8"}, "</"},
              {:name_tag, %{}, ".inputs_for"},
              {:punctuation, %{group_id: "group-8"}, ">"},
-             {:string, %{}, "\n\n"},
+             {:text, %{}, "
+
+"},
              {:punctuation, %{group_id: "group-9"}, "<"},
              {:name_tag, %{}, "label"},
              {:whitespace, %{}, " "},
              {:name_attribute, %{}, "class"},
              {:operator, %{}, "="},
-             {:string, %{}, "\"block"},
-             {:whitespace, %{}, " "},
-             {:string, %{}, "cursor-pointer\""},
+             {:string, %{}, "\"block cursor-pointer\""},
              {:punctuation, %{group_id: "group-9"}, ">"},
-             {:string, %{}, "\n  "},
+             {:text, %{}, "
+  "},
              {:punctuation, %{group_id: "group-10"}, "<"},
              {:name_tag, %{}, "input"},
              {:whitespace, %{}, " "},
@@ -614,15 +800,14 @@ defmodule HTMLLexerTokenizer do
              {:string, %{}, "\"hidden\""},
              {:whitespace, %{}, " "},
              {:punctuation, %{group_id: "group-10"}, "/>"},
-             {:whitespace, %{}, "\n  "},
-             {:string, %{}, "add"},
-             {:whitespace, %{}, " "},
-             {:string, %{}, "more"},
-             {:whitespace, %{}, "\n"},
+             {:text, %{}, "
+  add more
+"},
              {:punctuation, %{group_id: "group-11"}, "</"},
              {:name_tag, %{}, "label"},
              {:punctuation, %{group_id: "group-11"}, ">"},
-             {:string, %{}, "\n"}
+             {:text, %{}, "
+"}
            ] = lex(element)
   end
 end

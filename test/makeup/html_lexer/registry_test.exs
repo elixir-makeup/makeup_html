@@ -9,8 +9,10 @@ defmodule Makeup.Lexers.HTMLLexer.RegistryTest do
       assert {:ok, {HTMLLexer, []}} == Registry.fetch_lexer_by_name("html")
     end
 
-    test "file extension" do
-      assert {:ok, {HTMLLexer, []}} == Registry.fetch_lexer_by_extension("html")
+    test "file extensions" do
+      for extension <- ["html", "htm", "xhtml"] do
+        assert {:ok, {HTMLLexer, []}} == Registry.fetch_lexer_by_extension(extension)
+      end
     end
   end
 end

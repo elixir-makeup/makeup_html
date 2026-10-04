@@ -2,341 +2,160 @@ defmodule HTMLGenerators do
   @moduledoc false
   use ExUnitProperties
 
-  alias Makeup.Lexers.HTMLLexer.Combinators
-
-  @attributes Combinators.get_attributes() ++ Combinators.get_event_handler_attributes()
-
-  defp get_attributes do
-    @attributes
+  def tag_name do
+    one_of([
+      gen all(
+            first <- string([?a..?z, ?A..?Z, ?., ?:], length: 1),
+            rest <- string([?a..?z, ?A..?Z, ?0..?9, ?-, ?_, ?:, ?.], max_length: 5)
+          ) do
+        first <> rest
+      end,
+      member_of(["div", "DIV", "svg:rect", ".input", ":inner_block", "my-element", "_x"])
+    ])
   end
 
-  defp get_elements do
-    [
-      "a",
-      "abbr",
-      "address",
-      "area",
-      "article",
-      "aside",
-      "audio",
-      "b",
-      "base",
-      "bdi",
-      "bdo",
-      "blockquote",
-      "body",
-      "br",
-      "button",
-      "canvas",
-      "caption",
-      "cite",
-      "code",
-      "col",
-      "colgroup",
-      "data",
-      "datalist",
-      "dd",
-      "del",
-      "details",
-      "dfn",
-      "dialog",
-      "div",
-      "dl",
-      "dt",
-      "em",
-      "embed",
-      "fieldset",
-      "figcaption",
-      "figure",
-      "footer",
-      "form",
-      "h1",
-      "h2",
-      "h3",
-      "h4",
-      "h5",
-      "h6",
-      "head",
-      "header",
-      "hgroup",
-      "hr",
-      "html",
-      "i",
-      "iframe",
-      "img",
-      "input",
-      "ins",
-      "kbd",
-      "label",
-      "legend",
-      "li",
-      "link",
-      "main",
-      "map",
-      "mark",
-      "math",
-      "menu",
-      "meta",
-      "meter",
-      "nav",
-      "noscript",
-      "object",
-      "ol",
-      "optgroup",
-      "option",
-      "output",
-      "p",
-      "param",
-      "picture",
-      "pre",
-      "progress",
-      "q",
-      "rp",
-      "rt",
-      "ruby",
-      "s",
-      "samp",
-      "script",
-      "section",
-      "select",
-      "slot",
-      "small",
-      "source",
-      "span",
-      "strong",
-      "style",
-      "sub",
-      "summary",
-      "sup",
-      "svg",
-      "table",
-      "tbody",
-      "td",
-      "template",
-      "textarea",
-      "tfoot",
-      "th",
-      "thead",
-      "time",
-      "title",
-      "tr",
-      "track",
-      "u",
-      "ul",
-      "var",
-      "video",
-      "wbr"
-    ]
+  def attribute_name do
+    string([?a..?z, ?A..?Z, ?0..?9, ?-, ?_, ?:, ?@, ?., ?#, ?<, ?{, ?}],
+      min_length: 1,
+      max_length: 8
+    )
   end
 
-  defp insensitive_case_string(string) do
-    string
-    |> String.split("", trim: true)
-    |> insensitive_case_string([])
-    |> Enum.join("")
-  end
-
-  defp insensitive_case_string([], result), do: result
-
-  defp insensitive_case_string([h | t], result) do
-    insensitive_case_string(t, result ++ [insensitive_fun(Enum.random(0..1), h)])
-  end
-
-  defp insensitive_fun(0, string), do: String.downcase(string)
-  defp insensitive_fun(1, string), do: String.upcase(string)
-
-  ## Generators
-
-  def doctype_legacy_string do
-    ExUnitProperties.gen all(
-                           one_or_more <- StreamData.integer(1..5),
-                           quotation <- StreamData.member_of(["\"", "\'"])
-                         ) do
-      String.duplicate(" ", one_or_more) <>
-        insensitive_case_string("SYSTEM") <>
-        String.duplicate(" ", one_or_more) <> quotation <> "about:legacy-compat" <> quotation
+  def attribute do
+    gen all(
+          name <- attribute_name(),
+          quotation <- member_of(["\"", "'", ""]),
+          value <- string(:alphanumeric, max_length: 6),
+          before_equals <- member_of(["", " "]),
+          after_equals <- member_of(["", " "]),
+          valued? <- boolean()
+        ) do
+      if valued?,
+        do: name <> before_equals <> "=" <> after_equals <> quotation <> value <> quotation,
+        else: name
     end
   end
 
-  def doctype do
-    ExUnitProperties.gen all(
-                           one_or_more <- StreamData.integer(1..5),
-                           optional <- StreamData.integer(0..5),
-                           legacy_string <- doctype_legacy_string()
-                         ) do
-      "<!" <>
-        insensitive_case_string("DOCTYPE") <>
-        String.duplicate(" ", one_or_more) <>
-        insensitive_case_string("html") <>
-        legacy_string <>
-        String.duplicate(" ", optional) <> ">"
+  def attributes do
+    gen all(attributes <- list_of(attribute(), max_length: 3)) do
+      Enum.map_join(attributes, &(" " <> &1))
+    end
+  end
+
+  def start_tag do
+    gen all(
+          name <- tag_name(),
+          attributes <- attributes(),
+          closing <- member_of([">", "/>"])
+        ) do
+      "<" <> name <> attributes <> closing
+    end
+  end
+
+  def end_tag do
+    gen all(
+          name <- tag_name(),
+          extra <- member_of(["", " ", " extra", " a=b"])
+        ) do
+      "</" <> name <> extra <> ">"
     end
   end
 
   def comment do
-    ExUnitProperties.gen all(gen_text <- StreamData.string(:ascii)) do
-      text =
-        gen_text
-        |> String.replace_leading(">", "")
-        |> String.replace_leading("->", "")
-        |> String.replace("<!--", "")
-        |> String.replace("-->", "")
-        |> String.replace("--!>", "")
-        |> String.replace_trailing("<!-", "")
-
-      "<!--" <> text <> "-->"
+    gen all(
+          body <- string([?a..?z, ?\s, ?<, ?>, ?!, ?-], max_length: 12),
+          closing <- member_of(["-->", "--!>"])
+        ) do
+      "<!--" <> body <> closing
     end
   end
 
-  def void_element do
-    ExUnitProperties.gen all(element <- StreamData.member_of(get_elements())) do
-      "<" <> element <> ">"
+  def empty_comment do
+    member_of(["<!-->", "<!--->", "<!---->"])
+  end
+
+  def cdata do
+    gen all(
+          opening <- member_of(["<![CDATA[", "<![cdata["]),
+          body <- string([?a..?z, ?\s, ?<, ?>, ?]], max_length: 12)
+        ) do
+      opening <> body <> "]]>"
     end
   end
 
-  def attribute do
-    ExUnitProperties.gen all(
-                           quotation <- StreamData.member_of(["\"", "\'", ""]),
-                           name <- StreamData.member_of(get_attributes()),
-                           value <- StreamData.string(:alphanumeric),
-                           value not in get_attributes()
-                         ) do
-      if String.length(value) != 0,
-        do: name <> "=" <> quotation <> value <> quotation,
-        else: name
+  def doctype do
+    gen all(
+          keyword <- member_of(["DOCTYPE", "doctype", "DocType"]),
+          rest <- string([?a..?z, ?\s], max_length: 8)
+        ) do
+      "<!" <> keyword <> " " <> rest <> ">"
     end
   end
 
-  def element_attribute do
-    ExUnitProperties.gen all(
-                           quotation <- StreamData.member_of(["\"", "\'", ""]),
-                           name <- StreamData.member_of(get_attributes()),
-                           value <- StreamData.string(:alphanumeric),
-                           value not in get_attributes()
-                         ) do
-      if String.length(value) != 0,
-        do: name <> "=" <> quotation <> value <> quotation,
-        else: name
+  def bogus_comment do
+    gen all(
+          opening <- member_of(["<!", "<?"]),
+          body <- string([?a..?z, ?\s, ?!, ?[, ?], ?", ?=], max_length: 10)
+        ) do
+      opening <> body <> ">"
     end
   end
 
-  def single_element do
-    ExUnitProperties.gen all(
-                           element_name <- StreamData.member_of(get_elements()),
-                           content <- StreamData.string(:ascii),
-                           attributes <- StreamData.list_of(element_attribute(), max_length: 3),
-                           attributes_string <-
-                             StreamData.constant(" " <> Enum.join(attributes, " ")),
-                           element <-
-                             StreamData.member_of([
-                               "<" <>
-                                 element_name <>
-                                 attributes_string <>
-                                 ">" <>
-                                 (content
-                                  |> String.replace("<", "")
-                                  # TODO: Element content can contain ">"
-                                  |> String.replace(">", "")) <>
-                                 "</" <> element_name <> ">",
-                               "<" <> element_name <> attributes_string <> "/>",
-                               "<" <> element_name <> attributes_string <> ">"
-                             ])
-                         ) do
-      element
+  def character_reference do
+    gen all(
+          reference <-
+            one_of([
+              string([?a..?z], min_length: 2, max_length: 5),
+              map(string([?0..?9], min_length: 1, max_length: 4), &("#" <> &1))
+            ])
+        ) do
+      "&" <> reference <> ";"
     end
   end
 
-  def nested_element do
-    ExUnitProperties.gen all(
-                           element_name <- StreamData.member_of(get_elements()),
-                           content <- StreamData.one_of([void_element(), single_element()]),
-                           attributes <- StreamData.list_of(element_attribute(), max_length: 3)
-                         ) do
-      "<" <>
-        element_name <>
-        " " <>
-        Enum.join(attributes, " ") <>
-        ">" <> content <> "</" <> element_name <> ">"
+  def raw_element do
+    gen all(
+          name <- member_of(["script", "style", "SCRIPT", "Style"]),
+          attributes <- attributes(),
+          body <- string([?a..?z, ?<, ?>, ?=, ?/, ?!, ?\s], max_length: 14)
+        ) do
+      "<" <> name <> attributes <> ">" <> body <> "</" <> name <> ">"
     end
   end
 
-  def element do
-    ExUnitProperties.gen all(
-                           element <-
-                             StreamData.one_of([
-                               void_element(),
-                               single_element(),
-                               nested_element()
-                             ])
-                         ) do
-      element
-    end
+  def text do
+    string([?a..?z, ?A..?Z, ?0..?9, ?\s, ?\n, ?&, ?<, ?>, ?., ?-, ?!, ?é, ?€], max_length: 12)
+  end
+
+  # Drops the last character, so `<!-- hi -->` becomes `<!-- hi --`.
+  def truncated(generator) do
+    map(generator, &String.slice(&1, 0, max(String.length(&1) - 1, 0)))
+  end
+
+  def fragment do
+    one_of([
+      start_tag(),
+      end_tag(),
+      comment(),
+      empty_comment(),
+      cdata(),
+      doctype(),
+      bogus_comment(),
+      character_reference(),
+      raw_element(),
+      text(),
+      truncated(start_tag()),
+      truncated(end_tag()),
+      truncated(comment()),
+      truncated(cdata()),
+      truncated(doctype()),
+      truncated(raw_element())
+    ])
   end
 
   def document do
-    ExUnitProperties.gen all(
-                           bom <- StreamData.member_of([:unicode.encoding_to_bom(:utf8), ""]),
-                           any_comments <- StreamData.list_of(comment(), max_length: 3),
-                           doctype <- doctype(),
-                           document_content <- StreamData.list_of(element(), max_length: 3)
-                         ) do
-      comments = Enum.join(any_comments, "\n")
-      document = "<html>\n" <> Enum.join(document_content, "\n") <> "\n</html>"
-
-      bom <>
-        comments <> "\n" <> doctype <> "\n" <> comments <> "\n" <> document <> "\n" <> comments
-    end
-  end
-
-  ###################################################################
-  # Incorrect
-  ###################################################################
-
-  def incorrect_doctype do
-    ExUnitProperties.gen all(doctype <- doctype()) do
-      doctype
-      |> String.replace_suffix(">", "")
-    end
-  end
-
-  def incorrect_void_element do
-    ExUnitProperties.gen all(void_element <- void_element()) do
-      void_element
-      |> String.replace_suffix(">", "")
-    end
-  end
-
-  def incorrect_single_element do
-    ExUnitProperties.gen all(single_element <- single_element()) do
-      single_element
-      |> String.replace_suffix(">", "")
-    end
-  end
-
-  def incorrect_nested_element do
-    ExUnitProperties.gen all(nested_element <- nested_element()) do
-      nested_element
-      |> String.replace_suffix(">", "")
-    end
-  end
-
-  def incorrect_element do
-    ExUnitProperties.gen all(
-                           incorrect_element <-
-                             StreamData.one_of([
-                               incorrect_void_element(),
-                               incorrect_single_element(),
-                               incorrect_nested_element()
-                             ])
-                         ) do
-      incorrect_element
-    end
-  end
-
-  def incorrect_document do
-    ExUnitProperties.gen all(document <- document()) do
-      document
-      |> String.replace("<", "")
+    gen all(fragments <- list_of(fragment(), max_length: 12)) do
+      Enum.join(fragments)
     end
   end
 end
