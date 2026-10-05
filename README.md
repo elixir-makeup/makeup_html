@@ -1,6 +1,8 @@
 # MakeupHTML
 
 ![CI](https://github.com/elixir-makeup/makeup_html/actions/workflows/ci.yml/badge.svg)
+[![Hex.pm](https://img.shields.io/hexpm/v/makeup_html.svg)](https://hex.pm/packages/makeup_html)
+[![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/makeup_html)
 
 A [Makeup](https://github.com/elixir-makeup/makeup/) lexer for the `HTML` language.
 
@@ -15,7 +17,7 @@ Add `makeup_html` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:makeup_html, "~> 0.2.0"}
+    {:makeup_html, "~> 1.0"}
   ]
 end
 ```
